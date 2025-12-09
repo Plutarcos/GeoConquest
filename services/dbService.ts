@@ -62,6 +62,19 @@ export class GameService {
     if (changed) this.saveState();
   }
 
+  // Helper to ensure a territory exists (used during setup if map click hasn't init'd it yet)
+  public ensureTerritory(id: string, name: string = "Unknown Region") {
+    if (!this.state.territories[id]) {
+      this.state.territories[id] = {
+        id,
+        name,
+        ownerId: null,
+        strength: 10
+      };
+      this.saveState();
+    }
+  }
+
   public async login(username: string): Promise<Player> {
     // Simulate DB latency
     await new Promise(r => setTimeout(r, 500));
@@ -118,6 +131,11 @@ export class GameService {
   }
 
   public async captureTerritory(playerId: string, territoryId: string) {
+    // Ensure exists just in case
+    if (!this.state.territories[territoryId]) {
+      this.ensureTerritory(territoryId);
+    }
+
     const t = this.state.territories[territoryId];
     if (t) {
       t.ownerId = playerId;

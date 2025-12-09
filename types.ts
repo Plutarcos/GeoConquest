@@ -29,6 +29,7 @@ export interface GeoLocation {
 
 export enum GameStatus {
   LOGIN = 'LOGIN',
+  SETUP = 'SETUP',
   LOCATING = 'LOCATING',
   PLAYING = 'PLAYING',
 }
