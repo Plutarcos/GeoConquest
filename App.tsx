@@ -1,16 +1,19 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { GameStatus, Player, GameState, Territory } from './types';
+import React, { useState, useEffect } from 'react';
+import { GameStatus, Player, GameState, Language, ShopItem } from './types';
 import { getUserLocation } from './services/geoService';
 import { gameService } from './services/dbService';
 import MapComponent from './components/Map';
 import HUD from './components/HUD';
+import { Shop } from './components/Shop';
 import { Tooltip } from 'react-tooltip';
 import { Loader2, Crosshair, MapPin, Play, XCircle } from 'lucide-react';
+import { TRANSLATIONS } from './constants';
 
 const App: React.FC = () => {
   const [status, setStatus] = useState<GameStatus>(GameStatus.LOGIN);
   const [username, setUsername] = useState('');
   const [player, setPlayer] = useState<Player | null>(null);
+  const [language, setLanguage] = useState<Language>('pt-BR');
   const [gameState, setGameState] = useState<GameState>({
     territories: {},
     players: {},
@@ -21,12 +24,14 @@ const App: React.FC = () => {
   const [message, setMessage] = useState<string | null>(null);
   const [tooltipContent, setTooltipContent] = useState("");
   const [isLocating, setIsLocating] = useState(false);
+  const [showShop, setShowShop] = useState(false);
+
+  const t = TRANSLATIONS[language];
 
   // Check for existing session
   useEffect(() => {
     const savedUser = localStorage.getItem('geoconquest_user');
     if (savedUser) {
-      // Auto-login logic could go here, but we'll stick to login screen for clarity or pre-fill
       const p = JSON.parse(savedUser);
       setUsername(p.username);
     }
@@ -38,9 +43,12 @@ const App: React.FC = () => {
       const interval = setInterval(() => {
         setGameState(prev => {
           const freshState = gameService.getLatestState();
+          // Sync player money which might change in background loop
+          if (player && freshState.players[player.id]) {
+            setPlayer(freshState.players[player.id]);
+          }
           return {
             ...freshState,
-            // Keep local UI state like selection
             currentPlayerId: prev.currentPlayerId,
             selectedTerritoryId: prev.selectedTerritoryId 
           };
@@ -48,7 +56,7 @@ const App: React.FC = () => {
       }, 1000);
       return () => clearInterval(interval);
     }
-  }, [status]);
+  }, [status, player]);
 
   // Setup Phase: Auto-locate
   useEffect(() => {
@@ -57,10 +65,11 @@ const App: React.FC = () => {
       getUserLocation()
         .then(loc => {
            if (loc.countryCode) {
-             console.log("Auto-located:", loc.countryCode);
-             gameService.ensureTerritory(loc.countryCode);
-             setGameState(prev => ({ ...prev, selectedTerritoryId: loc.countryCode! }));
-             showToast(`Located: ${loc.countryCode}`, 'success');
+             const idStr = String(loc.countryCode); // ensure string
+             console.log("Auto-located:", idStr);
+             gameService.ensureTerritory(idStr);
+             setGameState(prev => ({ ...prev, selectedTerritoryId: idStr }));
+             showToast(`${t.located}: ${idStr}`, 'success');
            } else {
              showToast("Could not determine location. Please select on map.", 'info');
            }
@@ -70,7 +79,7 @@ const App: React.FC = () => {
         })
         .finally(() => setIsLocating(false));
     }
-  }, [status]);
+  }, [status, t]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -93,21 +102,21 @@ const App: React.FC = () => {
     try {
       await gameService.captureTerritory(player.id, gameState.selectedTerritoryId);
       setStatus(GameStatus.PLAYING);
-      showToast("Game Started! Territory Captured.", 'success');
+      showToast(t.startConquest, 'success');
     } catch (e) {
       showToast("Error starting game", 'error');
     }
   };
 
   const handleTerritoryClick = async (geo: any) => {
+    const clickedId = String(geo.id);
+    
     // Ensure territory exists in DB
-    if (!gameState.territories[geo.id]) {
-      gameService.initMapData([{ id: geo.id, properties: geo.properties }]);
+    if (!gameState.territories[clickedId]) {
+      gameService.initMapData([{ id: clickedId, properties: geo.properties }]);
     }
-    const clickedId = geo.id;
 
     if (status === GameStatus.SETUP) {
-      // In setup mode, clicking just selects the starting point
       setGameState(prev => ({ ...prev, selectedTerritoryId: clickedId }));
       return;
     }
@@ -127,14 +136,37 @@ const App: React.FC = () => {
         const result = await gameService.attackTerritory(player.id, gameState.selectedTerritoryId, clickedId);
         showToast(result.message, result.success ? 'success' : 'error');
         // Force update
+        const newState = gameService.getLatestState();
         setGameState(prev => ({
            ...prev, 
-           ...gameService.getLatestState(),
+           ...newState,
            selectedTerritoryId: result.success ? null : prev.selectedTerritoryId
         }));
       } else {
-        showToast("Select your territory first to attack!", 'info');
+        showToast(t.cmd_select, 'info');
       }
+    }
+  };
+
+  const handlePurchase = async (item: ShopItem) => {
+    if (!player) return;
+    
+    // Some items require a target territory
+    let targetId: string | undefined = undefined;
+    if (item.id === 'recruit') {
+       if (!gameState.selectedTerritoryId) {
+         showToast("Select a territory first!", 'error');
+         return;
+       }
+       targetId = gameState.selectedTerritoryId;
+    }
+
+    const result = await gameService.purchaseUpgrade(player.id, item.id, targetId);
+    showToast(result.message, result.success ? 'success' : 'error');
+    if (result.success) {
+      setPlayer(prev => prev ? ({ ...prev, money: prev.money - item.cost }) : null);
+      // Update territory state instantly
+      setGameState(prev => ({ ...prev, ...gameService.getLatestState() }));
     }
   };
 
@@ -152,8 +184,8 @@ const App: React.FC = () => {
   return (
     <div className="w-screen h-screen overflow-hidden bg-dark-bg text-white font-sans relative">
       
-      {/* Background Map - Always visible */}
-      <div className={`transition-all duration-1000 ${status === GameStatus.PLAYING || status === GameStatus.SETUP ? 'opacity-100' : 'opacity-30 blur-sm'}`}>
+      {/* Background Map */}
+      <div className={`transition-all duration-1000 w-full h-full ${status === GameStatus.PLAYING || status === GameStatus.SETUP ? 'opacity-100' : 'opacity-30 blur-sm'}`}>
          <MapComponent 
             territories={gameState.territories}
             players={gameState.players}
@@ -170,19 +202,19 @@ const App: React.FC = () => {
         <div className="absolute inset-0 flex items-center justify-center z-50">
           <div className="bg-panel-bg p-8 rounded-2xl border border-neon-blue shadow-[0_0_50px_rgba(0,243,255,0.2)] backdrop-blur-xl max-w-md w-full mx-4 animate-in fade-in zoom-in duration-500">
             <h1 className="text-4xl font-bold text-center mb-2 bg-gradient-to-r from-neon-blue to-neon-green bg-clip-text text-transparent">
-              GEOCONQUEST
+              {t.gameTitle}
             </h1>
-            <p className="text-gray-400 text-center mb-8">World Domination Strategy</p>
+            <p className="text-gray-400 text-center mb-8">{t.subTitle}</p>
             
             <form onSubmit={handleLogin} className="space-y-6">
               <div>
-                <label className="block text-xs uppercase tracking-wider text-gray-500 mb-1">Codename</label>
+                <label className="block text-xs uppercase tracking-wider text-gray-500 mb-1">{t.loginPrompt}</label>
                 <input 
                   type="text" 
                   value={username}
                   onChange={e => setUsername(e.target.value)}
                   className="w-full bg-black/50 border border-gray-700 rounded-lg p-3 text-white focus:border-neon-blue focus:outline-none transition"
-                  placeholder="Enter your alias..."
+                  placeholder="..."
                   required
                   maxLength={12}
                 />
@@ -191,8 +223,16 @@ const App: React.FC = () => {
                 type="submit"
                 className="w-full bg-neon-blue hover:bg-cyan-400 text-black font-bold py-3 rounded-lg shadow-lg shadow-cyan-500/20 transition transform hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2"
               >
-                INITIALIZE UPLINK
+                {t.loginBtn}
               </button>
+              
+              <div className="flex justify-center gap-4 text-sm text-gray-500 mt-4">
+                 <button type="button" onClick={() => setLanguage('pt-BR')} className={language === 'pt-BR' ? 'text-neon-blue' : ''}>PT</button>
+                 <button type="button" onClick={() => setLanguage('en')} className={language === 'en' ? 'text-neon-blue' : ''}>EN</button>
+                 <button type="button" onClick={() => setLanguage('es')} className={language === 'es' ? 'text-neon-blue' : ''}>ES</button>
+                 <button type="button" onClick={() => setLanguage('de')} className={language === 'de' ? 'text-neon-blue' : ''}>DE</button>
+                 <button type="button" onClick={() => setLanguage('zh')} className={language === 'zh' ? 'text-neon-blue' : ''}>CN</button>
+              </div>
             </form>
           </div>
         </div>
@@ -205,14 +245,14 @@ const App: React.FC = () => {
               <div className="flex items-start justify-between">
                 <div>
                    <h2 className="text-neon-green font-bold text-xl flex items-center gap-2">
-                     <MapPin size={24} /> SELECT STARTING BASE
+                     <MapPin size={24} /> {t.selectBase}
                    </h2>
                    <p className="text-gray-400 text-sm mt-1">
-                     {isLocating ? "Scanning satellite feed..." : "Select a territory on the map to begin your conquest."}
+                     {isLocating ? t.scanning : t.selectBaseDesc}
                    </p>
                 </div>
                 {isLocating ? (
-                   <button onClick={() => setIsLocating(false)} className="bg-red-900/50 hover:bg-red-900 p-2 rounded text-red-200" title="Cancel Auto-locate">
+                   <button onClick={() => setIsLocating(false)} className="bg-red-900/50 hover:bg-red-900 p-2 rounded text-red-200">
                       <XCircle size={20} />
                    </button>
                 ) : (
@@ -222,14 +262,14 @@ const App: React.FC = () => {
 
               {isLocating && (
                 <div className="flex items-center gap-2 text-neon-blue text-sm animate-pulse">
-                   <Loader2 className="animate-spin" size={16} /> triangulating position...
+                   <Loader2 className="animate-spin" size={16} /> {t.scanning}
                 </div>
               )}
 
               <div className="bg-black/40 p-3 rounded-lg border border-gray-700">
-                <span className="text-xs text-gray-500 uppercase block mb-1">Selected Region</span>
+                <span className="text-xs text-gray-500 uppercase block mb-1">Target</span>
                 <span className="text-xl font-mono text-white font-bold">
-                   {getSelectedTerritoryName() || "NO TERRITORY SELECTED"}
+                   {getSelectedTerritoryName() || "..."}
                 </span>
               </div>
 
@@ -242,7 +282,7 @@ const App: React.FC = () => {
                     : "bg-gray-800 text-gray-500 cursor-not-allowed"
                  }`}
               >
-                <Play size={20} fill="currentColor" /> START CONQUEST
+                <Play size={20} fill="currentColor" /> {t.startConquest}
               </button>
            </div>
          </div>
@@ -253,8 +293,21 @@ const App: React.FC = () => {
         <HUD 
           player={player} 
           territories={gameState.territories} 
+          language={language}
+          onLanguageChange={setLanguage}
+          onToggleShop={() => setShowShop(true)}
           onReset={() => gameService.resetGame()}
           onLogout={() => window.location.reload()}
+        />
+      )}
+
+      {/* Shop Modal */}
+      {showShop && player && (
+        <Shop 
+          language={language}
+          currentMoney={player.money}
+          onPurchase={handlePurchase}
+          onClose={() => setShowShop(false)}
         />
       )}
 

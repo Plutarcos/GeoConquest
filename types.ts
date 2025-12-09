@@ -2,14 +2,14 @@ export interface Player {
   id: string;
   username: string;
   color: string;
+  money: number;
 }
 
 export interface Territory {
-  id: string; // ISO 3 code
+  id: string; // ISO 3 code or numeric ID from topojson
   name: string;
   ownerId: string | null;
   strength: number;
-  // Dynamic properties for rendering
   path?: string; 
 }
 
@@ -24,7 +24,7 @@ export interface GameState {
 export interface GeoLocation {
   lat: number;
   lng: number;
-  countryCode?: string; // ISO 2 or 3
+  countryCode?: string; // ISO 3
 }
 
 export enum GameStatus {
@@ -32,4 +32,14 @@ export enum GameStatus {
   SETUP = 'SETUP',
   LOCATING = 'LOCATING',
   PLAYING = 'PLAYING',
+}
+
+export type Language = 'pt-BR' | 'en' | 'es' | 'de' | 'zh';
+
+export interface ShopItem {
+  id: string;
+  nameKey: string;
+  cost: number;
+  effect: string;
+  icon: string;
 }
