@@ -1,5 +1,6 @@
 
 
+
 // Leaflet Tile Layer (Dark Matter)
 export const MAP_TILE_URL = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
 export const MAP_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
@@ -26,17 +27,24 @@ export const INCOME_PER_TERRITORY = 5;
 export const GROWTH_RATE_MS = 2000; 
 export const MAX_STRENGTH = 5000;
 
-// SQLite Cloud HTTP Configuration
-export const DB_CONFIG = {
-  host: "cahitlmmvk.g1.sqlite.cloud",
-  // Using standard HTTPS port 443
-  username: "admin",
-  password: "Labubu123@",
-  apiKey: "t4RhYseJkrslILKbJELwkbeOiLEDIPJRByyRLRavpaU",
-  database: "geoconquest.sqlite" // We will create and use this specific DB
-};
+// SQLite Cloud SDK Configuration
+const DB_HOST = "cahitlmmvk.g1.sqlite.cloud";
+const DB_PORT = "8860";
+const DB_USER = "admin";
+const DB_PASS = "Labubu123@";
+const DB_NAME = "geoconquest.sqlite";
+const API_KEY = "t4RhYseJkrslILKbJELwkbeOiLEDIPJRByyRLRavpaU";
 
-export const SQL_INIT_DB = `CREATE DATABASE IF NOT EXISTS ${DB_CONFIG.database};`;
+// Connection String for System Operations (Connecting to default 'sqlitecloud' db to create new dbs)
+// URL Encoding password just in case
+const ENCODED_PASS = encodeURIComponent(DB_PASS);
+
+export const SYSTEM_CONN_STRING = `sqlitecloud://${DB_USER}:${ENCODED_PASS}@${DB_HOST}:${DB_PORT}/sqlitecloud?apikey=${API_KEY}`;
+export const GAME_CONN_STRING = `sqlitecloud://${DB_USER}:${ENCODED_PASS}@${DB_HOST}:${DB_PORT}/${DB_NAME}?apikey=${API_KEY}`;
+
+export const DB_DATABASE_NAME = DB_NAME;
+
+export const SQL_INIT_DB = `CREATE DATABASE IF NOT EXISTS ${DB_NAME};`;
 
 export const SQL_INIT_TABLES = [
   `CREATE TABLE IF NOT EXISTS players (

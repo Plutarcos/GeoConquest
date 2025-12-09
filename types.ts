@@ -72,3 +72,11 @@ export interface SqliteCloudResponse {
   columns?: string[];
   status: string;
 }
+
+declare global {
+  interface Window {
+    sqlitecloud: {
+      Database: any;
+    };
+  }
+}

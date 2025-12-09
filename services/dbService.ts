@@ -1,27 +1,13 @@
 
-
-
-import { GameState, Player, Territory, SqliteCloudResponse } from '../types';
-import { INITIAL_STRENGTH, INITIAL_MONEY, INCOME_PER_TERRITORY, GRID_SIZE, DB_CONFIG, SQL_INIT_DB, SQL_INIT_TABLES } from '../constants';
+import { GameState, Player, Territory } from '../types';
+import { INITIAL_STRENGTH, INITIAL_MONEY, INCOME_PER_TERRITORY, GRID_SIZE, SQL_INIT_DB, SQL_INIT_TABLES, SYSTEM_CONN_STRING, GAME_CONN_STRING, DB_DATABASE_NAME } from '../constants';
 
 export class GameService {
   private state: GameState;
-  private endpoint: string;
   private offlineMode: boolean = false;
-  private authHeader: string;
-  private apiKeyHeader: string;
+  private db: any = null; // SQLiteCloud Database instance
 
   constructor() {
-    // Correct Endpoint: Standard HTTPS
-    this.endpoint = `https://${DB_CONFIG.host}/v2/webeditor/sql`;
-    
-    // Create Basic Auth Header (Backup)
-    const credentials = btoa(`${DB_CONFIG.username}:${DB_CONFIG.password}`);
-    this.authHeader = `Basic ${credentials}`;
-    
-    // Create Bearer Auth for standard queries using Admin API Key
-    this.apiKeyHeader = `Bearer ${DB_CONFIG.apiKey}`;
-
     this.state = {
       territories: {},
       players: {},
@@ -35,14 +21,14 @@ export class GameService {
 
     // Load offline data if exists
     if (localStorage.getItem('geoconquest_offline_data')) {
-      // We don't load it into state immediately, we let syncState handle it
+      // Data exists, but we wait for init to decide mode
     }
 
-    // Iniciar loop de renda passiva
+    // Passive income loop
     setInterval(() => this.passiveIncomeLoop(), 5000);
   }
 
-  // --- Helpers de Banco de Dados ---
+  // --- Helpers ---
 
   private getLocalData() {
     const json = localStorage.getItem('geoconquest_offline_data');
@@ -164,29 +150,19 @@ export class GameService {
     return result;
   }
 
-  private async createDatabase() {
+  // --- Cloud Logic with SDK ---
+
+  private async createDatabaseIfNeeded() {
+     console.log("Checking DB existence...");
      try {
-        console.log("Attempting to create database:", DB_CONFIG.database);
-        // Use Admin API Key to creating DB
-        const response = await fetch(this.endpoint, {
-            method: 'POST',
-            mode: 'cors',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': this.apiKeyHeader 
-            },
-            body: JSON.stringify({
-              sql: SQL_INIT_DB,
-              // IMPORTANT: Do NOT specify a database here, so it executes on the node's root
-            })
-        });
-        if (response.ok) {
-            console.log("Database created or already exists.");
-        } else {
-            console.warn("DB Create failed status:", response.status);
-        }
+        // Connect to System DB
+        const sysDb = new window.sqlitecloud.Database(SYSTEM_CONN_STRING);
+        await sysDb.sql(SQL_INIT_DB);
+        console.log(`Database ${DB_DATABASE_NAME} checked/created.`);
+        sysDb.close();
      } catch (e) {
-         console.warn("DB Create Network Error", e);
+        console.warn("DB Creation check failed (might already exist or network error):", e);
+        // Continue to try connecting to the game DB anyway
      }
   }
 
@@ -196,42 +172,19 @@ export class GameService {
     }
 
     try {
-      // Use API Key (Bearer) for general queries
-      const response = await fetch(this.endpoint, {
-        method: 'POST',
-        mode: 'cors',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': this.apiKeyHeader
-        },
-        body: JSON.stringify({
-          sql: sql,
-          database: DB_CONFIG.database
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`DB Error (${response.status})`);
-      }
-
-      const data: SqliteCloudResponse = await response.json();
+      if (!this.db) throw new Error("Database not initialized");
       
-      if (data.data) {
-        if (data.columns && data.data.length > 0) {
-          return data.data.map((row: any[]) => {
-            const obj: any = {};
-            data.columns!.forEach((col: string, index: number) => {
-              obj[col] = row[index];
-            });
-            return obj;
-          });
-        }
-        return data.data;
+      const result = await this.db.sql(sql);
+      
+      // SDK returns data usually as array of objects or array of arrays
+      // The official SDK often returns just the array of row objects
+      if (Array.isArray(result)) {
+        return result;
       }
       return [];
 
     } catch (error) {
-      console.warn("SQL Exec Error:", error);
+      console.warn("SQL Exec Error (SDK):", error);
       console.log("Switching to Offline Mode due to connection error.");
       this.offlineMode = true; 
       this.state.connected = false;
@@ -240,27 +193,42 @@ export class GameService {
   }
 
   public async initDatabase() {
-    console.log("Initializing Game DB Connection...");
+    console.log("Initializing Game DB Connection (SDK)...");
     
-    // Step 1: Try to create the database if it doesn't exist
-    await this.createDatabase();
-
-    // Step 2: Initialize Tables
-    // Execute tables creation one by one
-    for (const sql of SQL_INIT_TABLES) {
-      await this.execSql(sql); 
+    // Check if SDK loaded
+    if (!window.sqlitecloud) {
+        console.error("SQLiteCloud SDK not loaded!");
+        this.offlineMode = true;
+        return;
     }
 
-    // Step 3: Verify connection by reading back
-    if (!this.offlineMode) {
-      this.state.connected = true;
-      console.log("Cloud DB Connected & Initialized.");
-    } else {
-      console.log("Could not connect to Cloud. Starting in Local Mode.");
+    // Step 1: Create DB if needed
+    await this.createDatabaseIfNeeded();
+
+    // Step 2: Connect to Game DB
+    try {
+        this.db = new window.sqlitecloud.Database(GAME_CONN_STRING);
+        // Test connection
+        await this.db.sql('SELECT 1');
+        
+        // Step 3: Initialize Tables
+        for (const sql of SQL_INIT_TABLES) {
+            await this.db.sql(sql); 
+        }
+
+        this.state.connected = true;
+        this.offlineMode = false;
+        console.log("Cloud DB Connected & Initialized.");
+
+    } catch (e) {
+        console.error("Failed to connect to Game DB:", e);
+        this.offlineMode = true;
+        this.state.connected = false;
+        console.log("Starting in Local Mode.");
     }
   }
 
-  // --- Lógica do Jogo ---
+  // --- Game Logic ---
 
   public async login(username: string): Promise<Player> {
     const id = `user_${username.replace(/\s+/g, '_').toLowerCase()}`;
@@ -276,7 +244,7 @@ export class GameService {
         id: p.id,
         username: p.username,
         color: p.color,
-        money: parseFloat(p.money),
+        money: typeof p.money === 'string' ? parseFloat(p.money) : p.money,
         lastSeen: p.last_seen
       };
     } else {
@@ -292,6 +260,11 @@ export class GameService {
   }
 
   public async syncState(currentPlayerId: string | null): Promise<GameState> {
+    // If offline, ensure we have local data structure initiated
+    if (this.offlineMode && !localStorage.getItem('geoconquest_offline_data')) {
+        this.saveLocalData({ players: [], territories: [] });
+    }
+
     const playersData = await this.execSql(`SELECT * FROM players`);
     const playersMap: Record<string, Player> = {};
     if (Array.isArray(playersData)) {
@@ -300,7 +273,7 @@ export class GameService {
           id: p.id,
           username: p.username,
           color: p.color,
-          money: parseFloat(p.money),
+          money: typeof p.money === 'string' ? parseFloat(p.money) : p.money,
           lastSeen: p.last_seen
         };
       });
@@ -313,9 +286,9 @@ export class GameService {
         terrMap[t.id] = {
           id: t.id,
           ownerId: t.owner_id,
-          strength: parseInt(t.strength),
-          lat: parseFloat(t.lat),
-          lng: parseFloat(t.lng),
+          strength: typeof t.strength === 'string' ? parseInt(t.strength) : t.strength,
+          lat: typeof t.lat === 'string' ? parseFloat(t.lat) : t.lat,
+          lng: typeof t.lng === 'string' ? parseFloat(t.lng) : t.lng,
           name: t.name
         };
       });
