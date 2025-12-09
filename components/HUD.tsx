@@ -1,6 +1,7 @@
+
 import React from 'react';
 import { Player, Territory, Language } from '../types';
-import { Globe, ShieldAlert, RefreshCw, ShoppingCart, DollarSign, LogOut, MessageSquare } from 'lucide-react';
+import { Globe, ShieldAlert, RefreshCw, ShoppingCart, DollarSign, LogOut, MessageSquare, Cloud, CloudOff } from 'lucide-react';
 import { TRANSLATIONS } from '../constants';
 
 interface HUDProps {
@@ -78,10 +79,17 @@ const HUD: React.FC<HUDProps> = ({
           </div>
         </div>
 
-        {/* Money Display (Top Right) */}
-        <div className="bg-panel-bg backdrop-blur-md border border-neon-green/30 px-4 py-2 rounded-full shadow-lg pointer-events-auto flex items-center gap-2 text-neon-green">
-           <DollarSign size={18} />
-           <span className="font-mono font-bold text-xl">${Math.floor(player.money)}</span>
+        {/* Right Side: Money & Status */}
+        <div className="flex flex-col items-end gap-2 pointer-events-auto">
+          <div className="bg-panel-bg backdrop-blur-md border border-neon-green/30 px-4 py-2 rounded-full shadow-lg flex items-center gap-2 text-neon-green">
+             <DollarSign size={18} />
+             <span className="font-mono font-bold text-xl">${Math.floor(player.money)}</span>
+          </div>
+
+          <div className={`bg-panel-bg backdrop-blur-md border px-2 py-1 rounded-full shadow-lg flex items-center gap-1.5 text-[10px] font-bold uppercase ${connected ? 'border-green-500/30 text-green-400' : 'border-red-500/30 text-red-400'}`}>
+             {connected ? <Cloud size={12} /> : <CloudOff size={12} />}
+             <span>{connected ? t.active : t.live}</span>
+          </div>
         </div>
       </div>
 

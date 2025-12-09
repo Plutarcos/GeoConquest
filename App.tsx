@@ -42,6 +42,9 @@ const App: React.FC = () => {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [hasUnread, setHasUnread] = useState(false);
 
+  // Keep track of user's real location for recentering
+  const userRealLocation = useRef<{lat: number, lng: number} | null>(null);
+
   const t = TRANSLATIONS[language];
 
   // Initialize DB
@@ -75,7 +78,10 @@ const App: React.FC = () => {
           return {
             ...syncedState,
             currentPlayerId: prev.currentPlayerId,
-            selectedTerritoryId: prev.selectedTerritoryId 
+            selectedTerritoryId: prev.selectedTerritoryId,
+            // Don't override center if user is dragging, unless recentered
+            centerLat: prev.centerLat,
+            centerLng: prev.centerLng
           };
         });
       }, 2000);
@@ -89,10 +95,12 @@ const App: React.FC = () => {
       setIsLocating(true);
       getUserLocation()
         .then(async (loc) => {
-           // Gera grid local, isso vai criar os territórios no DB se não existirem
+           userRealLocation.current = { lat: loc.lat, lng: loc.lng };
+           
+           // Gera grid local
            await gameService.initLocalGrid(loc.lat, loc.lng);
            
-           // Força sincronização imediata para pegar o estado real do banco
+           // Força sincronização imediata
            const latestState = await gameService.syncState(player?.id || null);
            
            const myTerritoryId = gameService.getGridId(loc.lat, loc.lng);
@@ -112,6 +120,7 @@ const App: React.FC = () => {
            showToast("GPS Error. Using fallback.", 'error');
            const defLat = -23.5505; 
            const defLng = -46.6333;
+           userRealLocation.current = { lat: defLat, lng: defLng };
            gameService.initLocalGrid(defLat, defLng);
            setGameState(prev => ({ 
              ...prev, 
@@ -265,15 +274,26 @@ const App: React.FC = () => {
   };
 
   const handleRecenter = () => {
+    // If we have GPS location, use it
+    if (userRealLocation.current) {
+       setGameState(prev => ({ 
+         ...prev, 
+         centerLat: userRealLocation.current!.lat, 
+         centerLng: userRealLocation.current!.lng 
+       }));
+       setZoomLevel(16); // Reset Zoom
+       setRecenterTrigger(prev => prev + 1);
+       return;
+    }
+
+    // Fallback to selected territory
     if (gameState.selectedTerritoryId) {
        const t = gameState.territories[gameState.selectedTerritoryId];
        if (t) {
          setGameState(prev => ({ ...prev, centerLat: t.lat, centerLng: t.lng }));
          setRecenterTrigger(prev => prev + 1);
-         return;
        }
     }
-    setRecenterTrigger(prev => prev + 1);
   };
 
   return (
@@ -426,8 +446,12 @@ const App: React.FC = () => {
       {/* Notifications */}
       {message && (
         <div className="absolute top-24 left-1/2 -translate-x-1/2 pointer-events-none z-[1100] w-max max-w-[90vw] animate-in slide-in-from-top-4 fade-in duration-300">
-           <div className="bg-black/80 backdrop-blur-md border border-neon-blue/30 text-white px-6 py-3 rounded-full shadow-[0_0_20px_rgba(0,243,255,0.15)] flex items-center gap-3">
-              <Crosshair size={20} className="text-neon-blue" />
+           <div className={`backdrop-blur-md border px-6 py-3 rounded-full shadow-[0_0_20px_rgba(0,0,0,0.5)] flex items-center gap-3 ${
+             message.includes("Error") || message.includes("Offline") 
+             ? 'bg-red-900/80 border-red-500 text-white' 
+             : 'bg-black/80 border-neon-blue/30 text-white'
+           }`}>
+              <Crosshair size={20} className={message.includes("Error") ? "text-white" : "text-neon-blue"} />
               <span className="font-mono text-sm tracking-wide">{message}</span>
            </div>
         </div>
