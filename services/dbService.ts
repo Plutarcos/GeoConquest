@@ -1,14 +1,23 @@
 
+
 import { GameState, Player, Territory, SqliteCloudResponse } from '../types';
-import { INITIAL_STRENGTH, INITIAL_MONEY, INCOME_PER_TERRITORY, GRID_SIZE, DB_CONFIG, SQL_INIT } from '../constants';
+import { INITIAL_STRENGTH, INITIAL_MONEY, INCOME_PER_TERRITORY, GRID_SIZE, DB_CONFIG, SQL_INIT_DB, SQL_INIT_TABLES } from '../constants';
 
 export class GameService {
   private state: GameState;
   private endpoint: string;
   private offlineMode: boolean = false;
+  private authHeader: string;
 
   constructor() {
-    this.endpoint = `https://${DB_CONFIG.host}/v2/webeditor/sql`;
+    // NOTE: Using port 8860 as typically required for HTTP API on custom clusters,
+    // although browser might block it if not standard.
+    // We try to use the Webeditor API which is often enabled.
+    this.endpoint = `https://${DB_CONFIG.host}:${DB_CONFIG.port}/v2/webeditor/sql`;
+    
+    // Create Basic Auth Header using Admin credentials
+    const credentials = btoa(`${DB_CONFIG.username}:${DB_CONFIG.password}`);
+    this.authHeader = `Basic ${credentials}`;
 
     this.state = {
       territories: {},
@@ -42,7 +51,6 @@ export class GameService {
     localStorage.setItem('geoconquest_offline_data', JSON.stringify(data));
   }
 
-  // Simple SQL Parser for Local Mode
   private async execLocalSql(sql: string): Promise<any[]> {
     const data = this.getLocalData();
     let result: any[] = [];
@@ -153,19 +161,47 @@ export class GameService {
     return result;
   }
 
+  private async createDatabase() {
+     try {
+        console.log("Attempting to create database...");
+        const response = await fetch(this.endpoint, {
+            method: 'POST',
+            mode: 'cors',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': this.authHeader // Use Admin credentials
+            },
+            body: JSON.stringify({
+              sql: SQL_INIT_DB,
+              database: 'sqlite.db' // Connect to default/master DB to create new one
+            })
+        });
+        if (response.ok) {
+            console.log("Database created or already exists.");
+        } else {
+            console.warn("DB Create failed status:", response.status);
+        }
+     } catch (e) {
+         console.warn("DB Create Network Error", e);
+     }
+  }
+
   private async execSql(sql: string): Promise<any[]> {
-    // If we already failed once, don't try again
     if (this.offlineMode) {
       return this.execLocalSql(sql);
     }
 
     try {
+      // Ensure we target the correct database. 
+      // The Webeditor API usually takes `database` in body, but complex queries might need `USE` if the API session persists.
+      // We will rely on the body parameter.
+      
       const response = await fetch(this.endpoint, {
         method: 'POST',
         mode: 'cors',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${DB_CONFIG.apiKey}`
+          'Authorization': this.authHeader
         },
         body: JSON.stringify({
           sql: sql,
@@ -173,7 +209,8 @@ export class GameService {
         })
       });
 
-      if (response.status === 404 || !response.ok) {
+      if (!response.ok) {
+        // If 404, it might mean the endpoint is wrong OR the database doesn't exist yet.
         throw new Error(`DB Error (${response.status})`);
       }
 
@@ -194,25 +231,31 @@ export class GameService {
       return [];
 
     } catch (error) {
-      console.warn("Switching to Offline Mode due to error:", error);
-      this.offlineMode = true; // Switch to local mode permanently for this session
+      console.warn("SQL Exec Error:", error);
+      this.offlineMode = true; 
       this.state.connected = false;
       return this.execLocalSql(sql);
     }
   }
 
   public async initDatabase() {
-    console.log("Initializing DB...");
-    // Try to init, if it fails, it will switch to offline mode automatically inside execSql
-    for (const sql of SQL_INIT) {
+    console.log("Initializing Game DB Connection...");
+    
+    // Step 1: Try to create the database if it doesn't exist
+    // This runs against the default 'sqlite.db' usually available
+    await this.createDatabase();
+
+    // Step 2: Initialize Tables in the new DB
+    for (const sql of SQL_INIT_TABLES) {
       await this.execSql(sql);
     }
-    // If offline mode wasn't triggered, we are connected
+
+    // Step 3: Verify connection
     if (!this.offlineMode) {
       this.state.connected = true;
-      console.log("Cloud DB Connected.");
+      console.log("Cloud DB Connected & Initialized.");
     } else {
-      console.log("Local Mode Active.");
+      console.log("Could not connect to Cloud. Starting in Local Mode.");
     }
   }
 
@@ -248,30 +291,37 @@ export class GameService {
   }
 
   public async syncState(currentPlayerId: string | null): Promise<GameState> {
+    // If offline, try to reconnect occasionally? 
+    // For now, if offlineMode is true, it stays true until refresh.
+    
     const playersData = await this.execSql(`SELECT * FROM players`);
     const playersMap: Record<string, Player> = {};
-    playersData.forEach((p: any) => {
-      playersMap[p.id] = {
-        id: p.id,
-        username: p.username,
-        color: p.color,
-        money: parseFloat(p.money),
-        lastSeen: p.last_seen
-      };
-    });
+    if (Array.isArray(playersData)) {
+      playersData.forEach((p: any) => {
+        playersMap[p.id] = {
+          id: p.id,
+          username: p.username,
+          color: p.color,
+          money: parseFloat(p.money),
+          lastSeen: p.last_seen
+        };
+      });
+    }
 
     const terrData = await this.execSql(`SELECT * FROM territories`);
     const terrMap: Record<string, Territory> = {};
-    terrData.forEach((t: any) => {
-      terrMap[t.id] = {
-        id: t.id,
-        ownerId: t.owner_id,
-        strength: parseInt(t.strength),
-        lat: parseFloat(t.lat),
-        lng: parseFloat(t.lng),
-        name: t.name
-      };
-    });
+    if (Array.isArray(terrData)) {
+      terrData.forEach((t: any) => {
+        terrMap[t.id] = {
+          id: t.id,
+          ownerId: t.owner_id,
+          strength: parseInt(t.strength),
+          lat: parseFloat(t.lat),
+          lng: parseFloat(t.lng),
+          name: t.name
+        };
+      });
+    }
 
     this.state.players = playersMap;
     this.state.territories = terrMap;
@@ -435,6 +485,9 @@ export class GameService {
     
     const user = JSON.parse(currentUserJson);
     const userId = user.id;
+
+    // Must verify if we have data to avoid errors
+    if (!this.state.territories) return;
 
     const ownedCount = Object.values(this.state.territories).filter(t => t.ownerId === userId).length;
     

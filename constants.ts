@@ -1,4 +1,5 @@
 
+
 // Leaflet Tile Layer (Dark Matter)
 export const MAP_TILE_URL = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
 export const MAP_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
@@ -29,11 +30,15 @@ export const MAX_STRENGTH = 5000;
 export const DB_CONFIG = {
   host: "cahitlmmvk.g1.sqlite.cloud",
   port: 8860,
+  username: "admin",
+  password: "Labubu123@",
   apiKey: "t4RhYseJkrslILKbJELwkbeOiLEDIPJRByyRLRavpaU",
   database: "geoconquest.sqlite" // Nome do arquivo DB na nuvem
 };
 
-export const SQL_INIT = [
+export const SQL_INIT_DB = `CREATE DATABASE IF NOT EXISTS ${DB_CONFIG.database};`;
+
+export const SQL_INIT_TABLES = [
   `CREATE TABLE IF NOT EXISTS players (
     id TEXT PRIMARY KEY, 
     username TEXT, 

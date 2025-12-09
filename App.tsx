@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useRef } from 'react';
 import { GameStatus, Player, GameState, Language, ShopItem, VisualEffect, ChatMessage } from './types';
 import { getUserLocation } from './services/geoService';
@@ -49,9 +50,16 @@ const App: React.FC = () => {
 
   // Initialize DB
   useEffect(() => {
-    gameService.initDatabase().then(() => {
-      console.log("DB Ready");
-    }).catch(e => console.error("DB Init failed", e));
+    const init = async () => {
+       try {
+         await gameService.initDatabase();
+         const state = gameService.getLatestState();
+         setGameState(prev => ({...prev, connected: state.connected}));
+       } catch (e) {
+         console.error("DB Init critical fail", e);
+       }
+    };
+    init();
   }, []);
 
   // Check for existing session
