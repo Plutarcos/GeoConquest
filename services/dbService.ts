@@ -1,5 +1,6 @@
 
 
+
 import { GameState, Player, Territory, SqliteCloudResponse } from '../types';
 import { INITIAL_STRENGTH, INITIAL_MONEY, INCOME_PER_TERRITORY, GRID_SIZE, DB_CONFIG, SQL_INIT_DB, SQL_INIT_TABLES } from '../constants';
 
@@ -11,14 +12,14 @@ export class GameService {
   private apiKeyHeader: string;
 
   constructor() {
-    // Correct Endpoint: Standard HTTPS, no custom port needed
+    // Correct Endpoint: Standard HTTPS
     this.endpoint = `https://${DB_CONFIG.host}/v2/webeditor/sql`;
     
-    // Create Basic Auth Header using Admin credentials for DB Creation
+    // Create Basic Auth Header (Backup)
     const credentials = btoa(`${DB_CONFIG.username}:${DB_CONFIG.password}`);
     this.authHeader = `Basic ${credentials}`;
     
-    // Create Bearer Auth for standard queries using API Key
+    // Create Bearer Auth for standard queries using Admin API Key
     this.apiKeyHeader = `Bearer ${DB_CONFIG.apiKey}`;
 
     this.state = {
@@ -165,47 +166,43 @@ export class GameService {
 
   private async createDatabase() {
      try {
-        console.log("Attempting to create database...");
-        // For Database creation, we use the Admin credentials (Basic Auth)
-        // and connect to the default 'sqlite.db' or 'auth.sqlitecloud'
+        console.log("Attempting to create database:", DB_CONFIG.database);
+        // Use Admin API Key to creating DB
         const response = await fetch(this.endpoint, {
             method: 'POST',
             mode: 'cors',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': this.authHeader 
+              'Authorization': this.apiKeyHeader 
             },
             body: JSON.stringify({
               sql: SQL_INIT_DB,
-              database: 'sqlite.db' 
+              // IMPORTANT: Do NOT specify a database here, so it executes on the node's root
             })
         });
         if (response.ok) {
             console.log("Database created or already exists.");
         } else {
             console.warn("DB Create failed status:", response.status);
-            if(response.status === 401) console.warn("Authentication failed for DB Create.");
         }
      } catch (e) {
          console.warn("DB Create Network Error", e);
      }
   }
 
-  private async execSql(sql: string, forceBasicAuth: boolean = false): Promise<any[]> {
+  private async execSql(sql: string): Promise<any[]> {
     if (this.offlineMode) {
       return this.execLocalSql(sql);
     }
 
     try {
-      // Use API Key (Bearer) for general queries unless forced otherwise
-      const auth = forceBasicAuth ? this.authHeader : this.apiKeyHeader;
-      
+      // Use API Key (Bearer) for general queries
       const response = await fetch(this.endpoint, {
         method: 'POST',
         mode: 'cors',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': auth
+          'Authorization': this.apiKeyHeader
         },
         body: JSON.stringify({
           sql: sql,
@@ -249,10 +246,9 @@ export class GameService {
     await this.createDatabase();
 
     // Step 2: Initialize Tables
-    // Use Basic Auth here too to ensure we have rights to modify schema if the API key is restricted
+    // Execute tables creation one by one
     for (const sql of SQL_INIT_TABLES) {
-      // Trying with Basic Auth for schema updates just to be safe
-      await this.execSql(sql, true); 
+      await this.execSql(sql); 
     }
 
     // Step 3: Verify connection by reading back

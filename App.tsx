@@ -1,5 +1,6 @@
 
 
+
 import React, { useState, useEffect, useRef } from 'react';
 import { GameStatus, Player, GameState, Language, ShopItem, VisualEffect, ChatMessage } from './types';
 import { getUserLocation } from './services/geoService';
@@ -57,9 +58,9 @@ const App: React.FC = () => {
          setGameState(prev => ({...prev, connected: state.connected}));
          
          if(state.connected) {
-             showToast("Online Mode Active", 'success');
+             showToast("Online: Multiplayer Active", 'success');
          } else {
-             showToast("Offline / Local Mode Active", 'info');
+             showToast("Offline: Local Mode Active", 'info');
          }
        } catch (e) {
          console.error("DB Init critical fail", e);

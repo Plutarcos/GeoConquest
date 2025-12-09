@@ -29,11 +29,11 @@ export const MAX_STRENGTH = 5000;
 // SQLite Cloud HTTP Configuration
 export const DB_CONFIG = {
   host: "cahitlmmvk.g1.sqlite.cloud",
-  // Port removed to default to HTTPS (443)
+  // Using standard HTTPS port 443
   username: "admin",
   password: "Labubu123@",
   apiKey: "t4RhYseJkrslILKbJELwkbeOiLEDIPJRByyRLRavpaU",
-  database: "geoconquest.sqlite" // Nome do arquivo DB na nuvem
+  database: "geoconquest.sqlite" // We will create and use this specific DB
 };
 
 export const SQL_INIT_DB = `CREATE DATABASE IF NOT EXISTS ${DB_CONFIG.database};`;
