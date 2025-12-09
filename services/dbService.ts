@@ -8,16 +8,18 @@ export class GameService {
   private endpoint: string;
   private offlineMode: boolean = false;
   private authHeader: string;
+  private apiKeyHeader: string;
 
   constructor() {
-    // NOTE: Using port 8860 as typically required for HTTP API on custom clusters,
-    // although browser might block it if not standard.
-    // We try to use the Webeditor API which is often enabled.
-    this.endpoint = `https://${DB_CONFIG.host}:${DB_CONFIG.port}/v2/webeditor/sql`;
+    // Correct Endpoint: Standard HTTPS, no custom port needed
+    this.endpoint = `https://${DB_CONFIG.host}/v2/webeditor/sql`;
     
-    // Create Basic Auth Header using Admin credentials
+    // Create Basic Auth Header using Admin credentials for DB Creation
     const credentials = btoa(`${DB_CONFIG.username}:${DB_CONFIG.password}`);
     this.authHeader = `Basic ${credentials}`;
+    
+    // Create Bearer Auth for standard queries using API Key
+    this.apiKeyHeader = `Bearer ${DB_CONFIG.apiKey}`;
 
     this.state = {
       territories: {},
@@ -164,44 +166,46 @@ export class GameService {
   private async createDatabase() {
      try {
         console.log("Attempting to create database...");
+        // For Database creation, we use the Admin credentials (Basic Auth)
+        // and connect to the default 'sqlite.db' or 'auth.sqlitecloud'
         const response = await fetch(this.endpoint, {
             method: 'POST',
             mode: 'cors',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': this.authHeader // Use Admin credentials
+              'Authorization': this.authHeader 
             },
             body: JSON.stringify({
               sql: SQL_INIT_DB,
-              database: 'sqlite.db' // Connect to default/master DB to create new one
+              database: 'sqlite.db' 
             })
         });
         if (response.ok) {
             console.log("Database created or already exists.");
         } else {
             console.warn("DB Create failed status:", response.status);
+            if(response.status === 401) console.warn("Authentication failed for DB Create.");
         }
      } catch (e) {
          console.warn("DB Create Network Error", e);
      }
   }
 
-  private async execSql(sql: string): Promise<any[]> {
+  private async execSql(sql: string, forceBasicAuth: boolean = false): Promise<any[]> {
     if (this.offlineMode) {
       return this.execLocalSql(sql);
     }
 
     try {
-      // Ensure we target the correct database. 
-      // The Webeditor API usually takes `database` in body, but complex queries might need `USE` if the API session persists.
-      // We will rely on the body parameter.
+      // Use API Key (Bearer) for general queries unless forced otherwise
+      const auth = forceBasicAuth ? this.authHeader : this.apiKeyHeader;
       
       const response = await fetch(this.endpoint, {
         method: 'POST',
         mode: 'cors',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': this.authHeader
+          'Authorization': auth
         },
         body: JSON.stringify({
           sql: sql,
@@ -210,7 +214,6 @@ export class GameService {
       });
 
       if (!response.ok) {
-        // If 404, it might mean the endpoint is wrong OR the database doesn't exist yet.
         throw new Error(`DB Error (${response.status})`);
       }
 
@@ -232,6 +235,7 @@ export class GameService {
 
     } catch (error) {
       console.warn("SQL Exec Error:", error);
+      console.log("Switching to Offline Mode due to connection error.");
       this.offlineMode = true; 
       this.state.connected = false;
       return this.execLocalSql(sql);
@@ -242,15 +246,16 @@ export class GameService {
     console.log("Initializing Game DB Connection...");
     
     // Step 1: Try to create the database if it doesn't exist
-    // This runs against the default 'sqlite.db' usually available
     await this.createDatabase();
 
-    // Step 2: Initialize Tables in the new DB
+    // Step 2: Initialize Tables
+    // Use Basic Auth here too to ensure we have rights to modify schema if the API key is restricted
     for (const sql of SQL_INIT_TABLES) {
-      await this.execSql(sql);
+      // Trying with Basic Auth for schema updates just to be safe
+      await this.execSql(sql, true); 
     }
 
-    // Step 3: Verify connection
+    // Step 3: Verify connection by reading back
     if (!this.offlineMode) {
       this.state.connected = true;
       console.log("Cloud DB Connected & Initialized.");
@@ -291,9 +296,6 @@ export class GameService {
   }
 
   public async syncState(currentPlayerId: string | null): Promise<GameState> {
-    // If offline, try to reconnect occasionally? 
-    // For now, if offlineMode is true, it stays true until refresh.
-    
     const playersData = await this.execSql(`SELECT * FROM players`);
     const playersMap: Record<string, Player> = {};
     if (Array.isArray(playersData)) {

@@ -29,7 +29,7 @@ export const MAX_STRENGTH = 5000;
 // SQLite Cloud HTTP Configuration
 export const DB_CONFIG = {
   host: "cahitlmmvk.g1.sqlite.cloud",
-  port: 8860,
+  // Port removed to default to HTTPS (443)
   username: "admin",
   password: "Labubu123@",
   apiKey: "t4RhYseJkrslILKbJELwkbeOiLEDIPJRByyRLRavpaU",
@@ -95,7 +95,9 @@ export const TRANSLATIONS = {
     active: "Conectado",
     chat: "Comunicação",
     sendMessage: "Enviar mensagem...",
-    newMsg: "Nova Msg"
+    newMsg: "Nova Msg",
+    online: "Online",
+    offline: "Offline"
   },
   'en': {
     gameTitle: "GEOCONQUEST",
@@ -129,7 +131,9 @@ export const TRANSLATIONS = {
     active: "Connected",
     chat: "Comms",
     sendMessage: "Send message...",
-    newMsg: "New Msg"
+    newMsg: "New Msg",
+    online: "Online",
+    offline: "Offline"
   },
   'es': {
     gameTitle: "GEOCONQUISTA",
@@ -163,7 +167,9 @@ export const TRANSLATIONS = {
     active: "Conectado",
     chat: "Coms",
     sendMessage: "Enviar mensaje...",
-    newMsg: "Nuevo"
+    newMsg: "Nuevo",
+    online: "En Línea",
+    offline: "Sin Conexión"
   },
   'de': {
     gameTitle: "GEOEROBERUNG",
@@ -197,7 +203,9 @@ export const TRANSLATIONS = {
     active: "Verbunden",
     chat: "Komm",
     sendMessage: "Nachricht senden...",
-    newMsg: "Neu"
+    newMsg: "Neu",
+    online: "Online",
+    offline: "Offline"
   },
   'zh': {
     gameTitle: "地缘征服",
@@ -231,6 +239,8 @@ export const TRANSLATIONS = {
     active: "已连接",
     chat: "通讯",
     sendMessage: "发送消息...",
-    newMsg: "新消息"
+    newMsg: "新消息",
+    online: "在线",
+    offline: "离线"
   }
 };

@@ -9,7 +9,7 @@ import MapControls from './components/MapControls';
 import HUD from './components/HUD';
 import { Shop } from './components/Shop';
 import Chat from './components/Chat';
-import { Loader2, Crosshair, MapPin, Play } from 'lucide-react';
+import { Loader2, Crosshair, MapPin, Play, Wifi, WifiOff } from 'lucide-react';
 import { TRANSLATIONS } from './constants';
 
 const App: React.FC = () => {
@@ -55,8 +55,15 @@ const App: React.FC = () => {
          await gameService.initDatabase();
          const state = gameService.getLatestState();
          setGameState(prev => ({...prev, connected: state.connected}));
+         
+         if(state.connected) {
+             showToast("Online Mode Active", 'success');
+         } else {
+             showToast("Offline / Local Mode Active", 'info');
+         }
        } catch (e) {
          console.error("DB Init critical fail", e);
+         showToast("Connection Failed - Local Mode", 'error');
        }
     };
     init();
@@ -455,11 +462,14 @@ const App: React.FC = () => {
       {message && (
         <div className="absolute top-24 left-1/2 -translate-x-1/2 pointer-events-none z-[1100] w-max max-w-[90vw] animate-in slide-in-from-top-4 fade-in duration-300">
            <div className={`backdrop-blur-md border px-6 py-3 rounded-full shadow-[0_0_20px_rgba(0,0,0,0.5)] flex items-center gap-3 ${
-             message.includes("Error") || message.includes("Offline") 
+             message.includes("Error") || message.includes("Offline") || message.includes("Failed")
              ? 'bg-red-900/80 border-red-500 text-white' 
              : 'bg-black/80 border-neon-blue/30 text-white'
            }`}>
-              <Crosshair size={20} className={message.includes("Error") ? "text-white" : "text-neon-blue"} />
+              {message.includes("Online") ? <Wifi size={20} className="text-neon-green" /> : 
+               message.includes("Offline") ? <WifiOff size={20} className="text-red-400" /> :
+               <Crosshair size={20} className="text-neon-blue" />
+              }
               <span className="font-mono text-sm tracking-wide">{message}</span>
            </div>
         </div>
