@@ -229,10 +229,11 @@ export class GameService {
       if (potentialTarget.id !== attacker.id && potentialTarget.ownerId !== attacker.ownerId) {
          // Attack!
          if (attacker.strength > potentialTarget.strength + 5) {
-            const result = this.attackTerritory(attacker.ownerId!, attacker.id, potentialTarget.id);
-            if (result.success) {
-               console.log(`Bot expansion: ${attacker.ownerId} took ${potentialTarget.name}`);
-            }
+            this.attackTerritory(attacker.ownerId!, attacker.id, potentialTarget.id).then(result => {
+              if (result.success) {
+                 console.log(`Bot expansion: ${attacker.ownerId} took ${potentialTarget.name}`);
+              }
+            });
          }
       }
     }
