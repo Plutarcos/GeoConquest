@@ -5,7 +5,7 @@ import { gameService } from './services/dbService';
 import MapComponent from './components/Map';
 import HUD from './components/HUD';
 import { Tooltip } from 'react-tooltip';
-import { Loader2, Crosshair, MapPin, Play } from 'lucide-react';
+import { Loader2, Crosshair, MapPin, Play, XCircle } from 'lucide-react';
 
 const App: React.FC = () => {
   const [status, setStatus] = useState<GameStatus>(GameStatus.LOGIN);
@@ -22,9 +22,14 @@ const App: React.FC = () => {
   const [tooltipContent, setTooltipContent] = useState("");
   const [isLocating, setIsLocating] = useState(false);
 
-  // Initial Data Load (TopoJSON features mapping to game state)
+  // Check for existing session
   useEffect(() => {
-      // Init logic if needed, currently MapComponent + lazy init handles it
+    const savedUser = localStorage.getItem('geoconquest_user');
+    if (savedUser) {
+      // Auto-login logic could go here, but we'll stick to login screen for clarity or pre-fill
+      const p = JSON.parse(savedUser);
+      setUsername(p.username);
+    }
   }, []);
 
   // Game Loop Polling
@@ -53,13 +58,15 @@ const App: React.FC = () => {
         .then(loc => {
            if (loc.countryCode) {
              console.log("Auto-located:", loc.countryCode);
-             // We need to ensure the territory exists in state so we can select it
              gameService.ensureTerritory(loc.countryCode);
              setGameState(prev => ({ ...prev, selectedTerritoryId: loc.countryCode! }));
              showToast(`Located: ${loc.countryCode}`, 'success');
            } else {
              showToast("Could not determine location. Please select on map.", 'info');
            }
+        })
+        .catch(() => {
+           showToast("Location failed. Please select manually.", 'error');
         })
         .finally(() => setIsLocating(false));
     }
@@ -72,6 +79,7 @@ const App: React.FC = () => {
     try {
       const user = await gameService.login(username);
       setPlayer(user);
+      localStorage.setItem('geoconquest_user', JSON.stringify(user));
       setStatus(GameStatus.SETUP);
     } catch (error) {
       console.error(error);
@@ -203,8 +211,20 @@ const App: React.FC = () => {
                      {isLocating ? "Scanning satellite feed..." : "Select a territory on the map to begin your conquest."}
                    </p>
                 </div>
-                {isLocating && <Loader2 className="animate-spin text-neon-green" />}
+                {isLocating ? (
+                   <button onClick={() => setIsLocating(false)} className="bg-red-900/50 hover:bg-red-900 p-2 rounded text-red-200" title="Cancel Auto-locate">
+                      <XCircle size={20} />
+                   </button>
+                ) : (
+                  <MapPin className="text-gray-600" />
+                )}
               </div>
+
+              {isLocating && (
+                <div className="flex items-center gap-2 text-neon-blue text-sm animate-pulse">
+                   <Loader2 className="animate-spin" size={16} /> triangulating position...
+                </div>
+              )}
 
               <div className="bg-black/40 p-3 rounded-lg border border-gray-700">
                 <span className="text-xs text-gray-500 uppercase block mb-1">Selected Region</span>

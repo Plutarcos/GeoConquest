@@ -1,24 +1,36 @@
 {
-  "name": "geoconquest:-world-domination",
+  "name": "geoconquest-world-domination",
+  "version": "1.0.0",
   "private": true,
-  "version": "0.0.0",
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
-  },
   "dependencies": {
-    "react": "^19.2.1",
-    "react-dom": "^19.2.1",
-    "lucide-react": "^0.556.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "react-simple-maps": "^3.0.0",
-    "react-tooltip": "^5.30.0"
+    "react-tooltip": "^5.26.3",
+    "lucide-react": "^0.344.0",
+    "clsx": "^2.1.0",
+    "tailwind-merge": "^2.2.1"
   },
   "devDependencies": {
-    "@types/node": "^22.14.0",
-    "@vitejs/plugin-react": "^5.0.0",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.0",
+    "typescript": "^5.3.3",
+    "tailwindcss": "^3.4.1"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
   }
 }

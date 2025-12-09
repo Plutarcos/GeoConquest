@@ -1,23 +1,24 @@
 import { GameState, Player, Territory } from '../types';
-import { INITIAL_STRENGTH } from '../constants';
+import { INITIAL_STRENGTH, DB_CONFIG } from '../constants';
 
 // NOTE: In a real environment with the correct drivers installed, we would import the driver here.
 // import { Database } from '@sqlitecloud/drivers';
 
 /**
- * Since we cannot reliably install/bundle the @sqlitecloud/drivers package in this 
- * strict runtime without a package.json install step, we will SIMULATE the 
- * multiplayer database experience using LocalStorage and "Fake" network delays.
+ * MOCK DATABASE SERVICE
  * 
- * However, the structure is designed so you can swap the methods below with actual
- * SQL queries.
+ * Since this is a browser-only environment (React Client), we cannot directly use the SQLiteCloud Node.js driver securely
+ * without exposing the Admin API Key.
  * 
- * Target Schema for SQLite:
- * - Table: users (id TEXT PRIMARY KEY, username TEXT, color TEXT)
- * - Table: territories (id TEXT PRIMARY KEY, owner_id TEXT, strength INTEGER)
+ * The connection string provided is:
+ * sqlitecloud://cahitlmmvk.g1.sqlite.cloud:8860/auth.sqlitecloud?apikey=t4RhYseJkrslILKbJELwkbeOiLEDIPJRByyRLRavpaU
+ * 
+ * In a production app, you would set up a Vercel Serverless Function (API Route) to proxy requests to this DB.
+ * 
+ * For this demo, we use LocalStorage to simulate the DB persistence so the game is playable immediately.
  */
 
-const STORAGE_KEY = 'geoconquest_state_v1';
+const STORAGE_KEY = 'geoconquest_state_v2';
 
 export class GameService {
   private state: GameState;
@@ -104,6 +105,7 @@ export class GameService {
       { id: 'bot_china', username: 'DragonDynasty', color: '#ff003c' },
       { id: 'bot_eu', username: 'EuroUnion', color: '#00f3ff' },
       { id: 'bot_usa', username: 'EagleForce', color: '#eab308' },
+      { id: 'bot_rus', username: 'BearLegion', color: '#9333ea' },
     ];
 
     bots.forEach(bot => {
@@ -117,15 +119,15 @@ export class GameService {
     if (ids.length > 0) {
       // China
       const cn = ids.find(id => id === "CHN" || id === "156");
-      if (cn) this.state.territories[cn].ownerId = 'bot_china';
+      if (cn) { this.state.territories[cn].ownerId = 'bot_china'; this.state.territories[cn].strength = 50; }
       
       // USA
       const us = ids.find(id => id === "USA" || id === "840");
-      if (us) this.state.territories[us].ownerId = 'bot_usa';
+      if (us) { this.state.territories[us].ownerId = 'bot_usa'; this.state.territories[us].strength = 50; }
 
       // Brazil or France
       const br = ids.find(id => id === "BRA" || id === "076");
-      if (br) this.state.territories[br].ownerId = 'bot_eu';
+      if (br) { this.state.territories[br].ownerId = 'bot_eu'; this.state.territories[br].strength = 40; }
     }
     this.saveState();
   }
@@ -138,6 +140,9 @@ export class GameService {
 
     const t = this.state.territories[territoryId];
     if (t) {
+      // If already owned by someone else, check strength? 
+      // Setup phase usually grants free first territory or attacks it.
+      // We will assume Setup grants it if neutral or weak.
       t.ownerId = playerId;
       t.strength = INITIAL_STRENGTH;
       this.saveState();
@@ -150,6 +155,7 @@ export class GameService {
 
     if (!source || !target) return { success: false, message: "Invalid territory" };
     if (source.ownerId !== attackerId) return { success: false, message: "You don't own the source!" };
+    if (target.ownerId === attackerId) return { success: false, message: "You already own this!" };
 
     // Simple Combat Logic
     // Must have > 1 strength to attack
@@ -173,19 +179,11 @@ export class GameService {
     } else {
       // Defeat
       this.state.territories[sourceId].strength = 1; // Lost army
-      this.state.territories[targetId].strength = defensePower - attackPower; // Defender losses
+      this.state.territories[targetId].strength = Math.max(1, defensePower - Math.floor(attackPower * 0.8)); // Defender losses some
       
       this.saveState();
       return { success: false, message: `Attack failed! ${target.name} held strong.` };
     }
-  }
-
-  public async reinforce(territoryId: string, amount: number) {
-     const t = this.state.territories[territoryId];
-     if (t) {
-       t.strength += amount;
-       this.saveState();
-     }
   }
 
   // Polling function to get latest state
@@ -205,14 +203,38 @@ export class GameService {
         if (t.ownerId && t.strength < 1000) {
           t.strength += 1;
         }
-        // AI Logic: Randomly expand
-        if (t.ownerId && t.ownerId.startsWith('bot_') && t.strength > 20) {
-             // Basic AI: find a neighbor (mocking neighbor logic by random index nearby is hard without adjacency graph)
-             // We will just let them accumulate strength for now to be "Bosses"
-        }
       });
+      
+      // AI Logic: Randomly expand (Simulation)
+      if (Math.random() > 0.7) {
+         this.runBotAI();
+      }
+
       this.lastTick = now;
       this.saveState();
+    }
+  }
+
+  private runBotAI() {
+    // Simple AI: Find a bot territory, try to attack a neighbor
+    // Since we don't have neighbor graph easily, we just pick two territories
+    const all = Object.values(this.state.territories);
+    const botTerritories = all.filter(t => t.ownerId && t.ownerId.startsWith('bot_') && t.strength > 20);
+    
+    if (botTerritories.length > 0) {
+      const attacker = botTerritories[Math.floor(Math.random() * botTerritories.length)];
+      // Try to find a target - purely random for mock
+      const potentialTarget = all[Math.floor(Math.random() * all.length)];
+      
+      if (potentialTarget.id !== attacker.id && potentialTarget.ownerId !== attacker.ownerId) {
+         // Attack!
+         if (attacker.strength > potentialTarget.strength + 5) {
+            const result = this.attackTerritory(attacker.ownerId!, attacker.id, potentialTarget.id);
+            if (result.success) {
+               console.log(`Bot expansion: ${attacker.ownerId} took ${potentialTarget.name}`);
+            }
+         }
+      }
     }
   }
 
