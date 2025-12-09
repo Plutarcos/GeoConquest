@@ -7,8 +7,8 @@ export class GameService {
   private endpoint: string;
 
   constructor() {
-    // Inicializa o endpoint HTTP v2 do SQLiteCloud
-    this.endpoint = `https://${DB_CONFIG.host}:${DB_CONFIG.port}/v2/webeditor/sql`;
+    // FIX: Remove port 8860 for HTTP requests. The REST API runs on standard HTTPS (443).
+    this.endpoint = `https://${DB_CONFIG.host}/v2/webeditor/sql`;
 
     this.state = {
       territories: {},
@@ -31,6 +31,7 @@ export class GameService {
     try {
       const response = await fetch(this.endpoint, {
         method: 'POST',
+        mode: 'cors', // Ensure CORS is handled
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${DB_CONFIG.apiKey}`
@@ -42,7 +43,8 @@ export class GameService {
       });
 
       if (!response.ok) {
-        throw new Error(`DB Error: ${response.statusText}`);
+        const errText = await response.text();
+        throw new Error(`DB Error (${response.status}): ${errText}`);
       }
 
       const data: SqliteCloudResponse = await response.json();
@@ -66,12 +68,17 @@ export class GameService {
       return [];
     } catch (error) {
       console.error("SQL Exec failed:", error);
+      // Don't throw here to prevent crashing the UI loop, but log it
       return [];
     }
   }
 
   public async initDatabase() {
     console.log("Initializing Cloud DB...");
+    // Try to create database first if possible, or just rely on existing
+    // Note: CREATE DATABASE might require admin permissions not available in this context,
+    // so we assume the DB 'geoconquest.sqlite' exists or will be auto-created by the platform if configured.
+    
     for (const sql of SQL_INIT) {
       await this.execSql(sql);
     }
@@ -191,11 +198,12 @@ export class GameService {
 
     // Tentar criar no DB (INSERT OR IGNORE)
     const strength = Math.floor(Math.random() * 20) + 5;
-    const sql = `INSERT INTO territories (id, owner_id, strength, lat, lng, name) 
-                 SELECT '${id}', NULL, ${strength}, ${snappedLat}, ${snappedLng}, '${name}'
-                 WHERE NOT EXISTS(SELECT 1 FROM territories WHERE id = '${id}')`;
     
-    await this.execSql(sql);
+    // Check first to avoid complex SQL
+    const check = await this.execSql(`SELECT 1 FROM territories WHERE id = '${id}'`);
+    if (check.length === 0) {
+         await this.execSql(`INSERT INTO territories (id, owner_id, strength, lat, lng, name) VALUES ('${id}', NULL, ${strength}, ${snappedLat}, ${snappedLng}, '${name}')`);
+    }
 
     // Retorna um objeto temporário até o próximo sync
     const t: Territory = {
