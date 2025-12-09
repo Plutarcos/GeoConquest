@@ -3,6 +3,7 @@ export interface Player {
   username: string;
   color: string;
   money: number;
+  lastSeen?: number; // Timestamp for online status
 }
 
 export interface Territory {
@@ -22,6 +23,7 @@ export interface GameState {
   lastUpdate: number;
   centerLat: number;
   centerLng: number;
+  connected: boolean; // Connection status to Cloud DB
 }
 
 export interface GeoLocation {

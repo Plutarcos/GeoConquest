@@ -5,8 +5,7 @@ import { gameService } from './services/dbService';
 import MapComponent from './components/Map';
 import HUD from './components/HUD';
 import { Shop } from './components/Shop';
-// Removed react-tooltip as Leaflet handles its own tooltips
-import { Loader2, Crosshair, MapPin, Play, XCircle } from 'lucide-react';
+import { Loader2, Crosshair, MapPin, Play } from 'lucide-react';
 import { TRANSLATIONS } from './constants';
 
 const App: React.FC = () => {
@@ -21,7 +20,8 @@ const App: React.FC = () => {
     selectedTerritoryId: null,
     lastUpdate: 0,
     centerLat: 0,
-    centerLng: 0
+    centerLng: 0,
+    connected: false
   });
   const [message, setMessage] = useState<string | null>(null);
   const [isLocating, setIsLocating] = useState(false);
@@ -38,23 +38,29 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Game Loop Polling
+  // Sync Loop (Polling for Multiplayer)
   useEffect(() => {
-    if (status === GameStatus.PLAYING) {
-      const interval = setInterval(() => {
+    if (status === GameStatus.PLAYING || status === GameStatus.SETUP) {
+      const interval = setInterval(async () => {
+        // Sync with Cloud
+        const syncedState = await gameService.syncState(player?.id || null);
+        
         setGameState(prev => {
-          const freshState = gameService.getLatestState();
           // Sync player money which might change in background loop
-          if (player && freshState.players[player.id]) {
-            setPlayer(freshState.players[player.id]);
+          if (player && syncedState.players[player.id]) {
+            // Keep local reference updated
+            setPlayer(prevP => {
+                if (!prevP) return null;
+                return { ...prevP, money: syncedState.players[player.id].money };
+            });
           }
           return {
-            ...freshState,
-            currentPlayerId: prev.currentPlayerId,
+            ...syncedState,
+            currentPlayerId: prev.currentPlayerId, // Preserve UI selection state
             selectedTerritoryId: prev.selectedTerritoryId 
           };
         });
-      }, 1000);
+      }, 2000); // Poll every 2 seconds
       return () => clearInterval(interval);
     }
   }, [status, player]);
@@ -132,14 +138,14 @@ const App: React.FC = () => {
     // Gameplay Logic
     if (clickedTerritory.ownerId === player.id) {
       setGameState(prev => ({ ...prev, selectedTerritoryId: clickedId }));
-      // showToast(`Selected Sector`);
     } else {
       if (gameState.selectedTerritoryId) {
         // Attempt Attack
         const result = await gameService.attackTerritory(player.id, gameState.selectedTerritoryId, clickedId);
         showToast(result.message, result.success ? 'success' : 'error');
-        // Force update
-        const newState = gameService.getLatestState();
+        
+        // Force immediate sync to show result
+        const newState = await gameService.syncState(player.id);
         setGameState(prev => ({
            ...prev, 
            ...newState,
@@ -167,7 +173,8 @@ const App: React.FC = () => {
     showToast(result.message, result.success ? 'success' : 'error');
     if (result.success) {
       setPlayer(prev => prev ? ({ ...prev, money: prev.money - item.cost }) : null);
-      setGameState(prev => ({ ...prev, ...gameService.getLatestState() }));
+      const newState = await gameService.syncState(player.id);
+      setGameState(prev => ({ ...prev, ...newState }));
     }
   };
 
@@ -278,6 +285,7 @@ const App: React.FC = () => {
           player={player} 
           territories={gameState.territories} 
           language={language}
+          connected={gameState.connected}
           onLanguageChange={setLanguage}
           onToggleShop={() => setShowShop(true)}
           onReset={() => gameService.resetGame()}

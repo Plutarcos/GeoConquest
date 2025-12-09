@@ -1,12 +1,13 @@
 import React from 'react';
 import { Player, Territory, Language } from '../types';
-import { Globe, ShieldAlert, LogOut, RefreshCw, ShoppingCart, DollarSign } from 'lucide-react';
+import { Globe, ShieldAlert, LogOut, RefreshCw, ShoppingCart, DollarSign, Wifi, WifiOff } from 'lucide-react';
 import { TRANSLATIONS } from '../constants';
 
 interface HUDProps {
   player: Player;
   territories: Record<string, Territory>;
   language: Language;
+  connected: boolean;
   onLanguageChange: (lang: Language) => void;
   onToggleShop: () => void;
   onReset: () => void;
@@ -17,6 +18,7 @@ const HUD: React.FC<HUDProps> = ({
   player, 
   territories, 
   language, 
+  connected,
   onLanguageChange,
   onToggleShop,
   onReset, 
@@ -89,36 +91,4 @@ const HUD: React.FC<HUDProps> = ({
               <button 
                 onClick={onLogout}
                 className="bg-gray-800/80 hover:bg-gray-700 text-white p-2 rounded-lg border border-gray-600 backdrop-blur transition"
-                title={t.logout}
-              >
-                <LogOut size={20} />
-              </button>
-            </div>
-        </div>
-      </div>
-
-      {/* Bottom Status */}
-      <div className="pointer-events-auto self-center bg-panel-bg backdrop-blur-md border border-gray-700 px-6 py-2 rounded-full mb-4 hidden sm:flex">
-        <p className="text-sm text-gray-400 flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-          {t.live}: <span className="text-neon-green">{t.active}</span>
-        </p>
-      </div>
-
-      {/* Legend / Instructions */}
-      <div className="pointer-events-auto absolute bottom-4 left-4 bg-panel-bg backdrop-blur-md border border-gray-700 p-4 rounded-lg hidden md:block max-w-xs">
-         <h3 className="text-gray-300 font-bold mb-2 text-sm uppercase">{t.commands}</h3>
-         <ul className="text-xs space-y-1 text-gray-400">
-           <li className="flex items-center gap-2"><div className="w-3 h-3 bg-[#0aff00]"></div> {t.yours}</li>
-           <li className="flex items-center gap-2"><div className="w-3 h-3 bg-[#1e293b]"></div> {t.neutral}</li>
-           <li className="flex items-center gap-2"><div className="w-3 h-3 bg-[#ff003c]"></div> {t.enemy}</li>
-           <li className="mt-2 text-white">{t.cmd_select}</li>
-           <li className="text-white">{t.cmd_attack}</li>
-           <li className="text-white italic opacity-70">{t.cmd_req}</li>
-         </ul>
-      </div>
-    </div>
-  );
-};
-
-export default HUD;
+                
