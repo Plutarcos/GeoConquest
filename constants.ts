@@ -1,6 +1,7 @@
 
 
 
+
 // Leaflet Tile Layer (Dark Matter)
 export const MAP_TILE_URL = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
 export const MAP_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
@@ -67,7 +68,9 @@ export const SQL_INIT_TABLES = [
 export const SHOP_ITEMS = [
   { id: 'recruit', cost: 50, nameKey: 'recruit_troops', effect: 'strength_10', icon: 'UserPlus' },
   { id: 'fortify', cost: 100, nameKey: 'fortify_base', effect: 'defense_bonus', icon: 'Shield' },
+  { id: 'shield', cost: 300, nameKey: 'energy_shield', effect: 'defense_50', icon: 'ShieldCheck' },
   { id: 'sabotage', cost: 200, nameKey: 'sabotage_enemy', effect: 'enemy_weakness', icon: 'Skull' },
+  { id: 'airstrike', cost: 500, nameKey: 'air_strike', effect: 'damage_50', icon: 'Zap' },
 ];
 
 export const TRANSLATIONS = {
@@ -88,8 +91,10 @@ export const TRANSLATIONS = {
     reset: "Resetar",
     logout: "Sair",
     recruit_troops: "Recrutar Tropas (+10)",
-    fortify_base: "Fortificar Base",
-    sabotage_enemy: "Sabotar Inimigo",
+    fortify_base: "Fortificar Base (+20)",
+    energy_shield: "Escudo de Energia (+50)",
+    sabotage_enemy: "Sabotar Inimigo (-15)",
+    air_strike: "Ataque Aéreo (-50)",
     buy: "Comprar",
     close: "Fechar",
     commands: "Tático",
@@ -124,8 +129,10 @@ export const TRANSLATIONS = {
     reset: "Reset",
     logout: "Logout",
     recruit_troops: "Recruit Troops (+10)",
-    fortify_base: "Fortify Base",
-    sabotage_enemy: "Sabotage Enemy",
+    fortify_base: "Fortify Base (+20)",
+    energy_shield: "Energy Shield (+50)",
+    sabotage_enemy: "Sabotage Enemy (-15)",
+    air_strike: "Air Strike (-50)",
     buy: "Buy",
     close: "Close",
     commands: "Tactical",
@@ -160,8 +167,10 @@ export const TRANSLATIONS = {
     reset: "Reiniciar",
     logout: "Salir",
     recruit_troops: "Reclutar Tropas (+10)",
-    fortify_base: "Fortificar Base",
-    sabotage_enemy: "Sabotear Enemigo",
+    fortify_base: "Fortificar Base (+20)",
+    energy_shield: "Escudo de Energía (+50)",
+    sabotage_enemy: "Sabotear Enemigo (-15)",
+    air_strike: "Ataque Aéreo (-50)",
     buy: "Comprar",
     close: "Cerrar",
     commands: "Táctica",
@@ -196,8 +205,10 @@ export const TRANSLATIONS = {
     reset: "Zurücksetzen",
     logout: "Ausloggen",
     recruit_troops: "Truppen rekrutieren (+10)",
-    fortify_base: "Basis befestigen",
-    sabotage_enemy: "Feind sabotieren",
+    fortify_base: "Basis befestigen (+20)",
+    energy_shield: "Energieschild (+50)",
+    sabotage_enemy: "Feind sabotieren (-15)",
+    air_strike: "Luftangriff (-50)",
     buy: "Kaufen",
     close: "Schließen",
     commands: "Taktik",
@@ -232,8 +243,10 @@ export const TRANSLATIONS = {
     reset: "重置",
     logout: "登出",
     recruit_troops: "招募军队 (+10)",
-    fortify_base: "加固基地",
-    sabotage_enemy: "破坏敌人",
+    fortify_base: "加固基地 (+20)",
+    energy_shield: "能量护盾 (+50)",
+    sabotage_enemy: "破坏敌人 (-15)",
+    air_strike: "空袭 (-50)",
     buy: "购买",
     close: "关闭",
     commands: "战术",

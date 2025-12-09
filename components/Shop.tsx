@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShoppingCart, Shield, UserPlus, Skull, X } from 'lucide-react';
+import { ShoppingCart, Shield, UserPlus, Skull, X, Zap, ShieldCheck } from 'lucide-react';
 import { SHOP_ITEMS, TRANSLATIONS } from '../constants';
 import { Language, ShopItem } from '../types';
 
@@ -18,6 +18,8 @@ export const Shop: React.FC<ShopProps> = ({ language, currentMoney, onPurchase, 
       case 'UserPlus': return <UserPlus size={24} />;
       case 'Shield': return <Shield size={24} />;
       case 'Skull': return <Skull size={24} />;
+      case 'Zap': return <Zap size={24} />;
+      case 'ShieldCheck': return <ShieldCheck size={24} />;
       default: return <ShoppingCart size={24} />;
     }
   };

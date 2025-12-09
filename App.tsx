@@ -1,6 +1,7 @@
 
 
 
+
 import React, { useState, useEffect, useRef } from 'react';
 import { GameStatus, Player, GameState, Language, ShopItem, VisualEffect, ChatMessage } from './types';
 import { getUserLocation } from './services/geoService';
@@ -261,7 +262,8 @@ const App: React.FC = () => {
     if (!player) return;
     
     let targetId: string | undefined = undefined;
-    if (item.id === 'recruit') {
+    // Items that require a selected territory
+    if (['recruit', 'fortify', 'sabotage', 'airstrike', 'shield'].includes(item.id)) {
        if (!gameState.selectedTerritoryId) {
          showToast("Select a territory first!", 'error');
          return;
@@ -273,9 +275,15 @@ const App: React.FC = () => {
     showToast(result.message, result.success ? 'success' : 'error');
     
     if (result.success) {
-      if (targetId && item.id === 'recruit') {
+      if (targetId) {
          const t = gameState.territories[targetId];
-         if (t) addVisualEffect("+10", t.lat, t.lng, 'heal');
+         if (t) {
+            if (item.id === 'recruit') addVisualEffect("+10", t.lat, t.lng, 'heal');
+            if (item.id === 'fortify') addVisualEffect("+20", t.lat, t.lng, 'heal');
+            if (item.id === 'shield') addVisualEffect("+50", t.lat, t.lng, 'heal');
+            if (item.id === 'sabotage') addVisualEffect("-15", t.lat, t.lng, 'damage');
+            if (item.id === 'airstrike') addVisualEffect("-50", t.lat, t.lng, 'damage');
+         }
       }
 
       setPlayer(prev => prev ? ({ ...prev, money: prev.money - item.cost }) : null);

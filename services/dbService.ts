@@ -1,4 +1,6 @@
 
+
+
 import { GameState, Player, Territory } from '../types';
 import { INITIAL_STRENGTH, INITIAL_MONEY, INCOME_PER_TERRITORY, GRID_SIZE, SQL_INIT_DB, SQL_INIT_TABLES, SYSTEM_CONN_STRING, GAME_CONN_STRING, DB_DATABASE_NAME } from '../constants';
 
@@ -33,118 +35,177 @@ export class GameService {
   private getLocalData() {
     const json = localStorage.getItem('geoconquest_offline_data');
     if (!json) return { players: [], territories: [] };
-    return JSON.parse(json);
+    
+    const data = JSON.parse(json);
+    
+    // Auto-fix corrupted duplicates in local storage
+    if (data.territories) {
+        const uniqueTerritories = new Map();
+        data.territories.forEach((t: any) => {
+            if (!uniqueTerritories.has(t.id)) {
+                uniqueTerritories.set(t.id, t);
+            }
+        });
+        if (uniqueTerritories.size !== data.territories.length) {
+             console.log("Fixed corrupted local data (duplicates removed)");
+             data.territories = Array.from(uniqueTerritories.values());
+             localStorage.setItem('geoconquest_offline_data', JSON.stringify(data));
+        }
+    }
+    return data;
   }
 
   private saveLocalData(data: any) {
     localStorage.setItem('geoconquest_offline_data', JSON.stringify(data));
   }
 
+  // Robust SQL Parser for Offline Mode
   private async execLocalSql(sql: string): Promise<any[]> {
     const data = this.getLocalData();
     let result: any[] = [];
     const now = Date.now();
 
-    // SELECT players
-    if (sql.match(/^SELECT \* FROM players/i)) {
-      if (sql.includes("WHERE id =")) {
-        const idMatch = sql.match(/id = '([^']+)'/);
-        if (idMatch) {
-          result = data.players.filter((p: any) => p.id === idMatch[1]);
+    const sqlUpper = sql.trim().toUpperCase();
+
+    // 1. SELECT
+    if (sqlUpper.startsWith("SELECT")) {
+        // SELECT * FROM players
+        if (sqlUpper.includes("FROM PLAYERS")) {
+            if (sqlUpper.includes("WHERE ID =")) {
+                const idMatch = sql.match(/id = '([^']+)'/i);
+                if (idMatch) {
+                    result = data.players.filter((p: any) => p.id === idMatch[1]);
+                }
+            } else {
+                result = data.players;
+            }
         }
-      } else {
-        result = data.players;
-      }
-    }
-    // SELECT territories
-    else if (sql.match(/^SELECT \* FROM territories/i)) {
-      if (sql.includes("WHERE id =")) {
-        const idMatch = sql.match(/id = '([^']+)'/);
-        if (idMatch) {
-          result = data.territories.filter((t: any) => t.id === idMatch[1]);
+        // SELECT ... FROM territories
+        else if (sqlUpper.includes("FROM TERRITORIES")) {
+            if (sqlUpper.includes("SELECT 1")) {
+                 const idMatch = sql.match(/id = '([^']+)'/i);
+                 if (idMatch) {
+                     const exists = data.territories.some((t: any) => t.id === idMatch[1]);
+                     result = exists ? [{1:1}] : [];
+                 }
+            } else if (sqlUpper.includes("WHERE ID =")) {
+                const idMatch = sql.match(/id = '([^']+)'/i);
+                if (idMatch) {
+                    result = data.territories.filter((t: any) => t.id === idMatch[1]);
+                }
+            } else {
+                result = data.territories;
+            }
         }
-      } else if (sql.includes("SELECT 1 FROM")) {
-         const idMatch = sql.match(/id = '([^']+)'/);
-         if (idMatch) {
-           const exists = data.territories.some((t: any) => t.id === idMatch[1]);
-           result = exists ? [{1:1}] : [];
-         }
-      } else {
-        result = data.territories;
-      }
     }
-    // INSERT player
-    else if (sql.match(/^INSERT INTO players/i)) {
-      const valuesMatch = sql.match(/VALUES \('([^']+)', '([^']+)', '([^']+)', ([0-9.]+), ([0-9]+)\)/);
-      if (valuesMatch) {
-        data.players.push({
-          id: valuesMatch[1],
-          username: valuesMatch[2],
-          color: valuesMatch[3],
-          money: parseFloat(valuesMatch[4]),
-          last_seen: parseInt(valuesMatch[5])
-        });
-        this.saveLocalData(data);
-      }
+    // 2. INSERT
+    else if (sqlUpper.startsWith("INSERT")) {
+        if (sqlUpper.includes("INTO PLAYERS")) {
+             // VALUES ('id', 'username', 'color', money, last_seen)
+             const valuesStr = sql.substring(sql.indexOf("VALUES") + 6).trim().replace(/^\(|\)$/g, '');
+             // Simple CSV split handling quotes
+             const parts = valuesStr.split(',').map(s => s.trim().replace(/^'|'$/g, ''));
+             
+             data.players.push({
+                 id: parts[0],
+                 username: parts[1],
+                 color: parts[2],
+                 money: parseFloat(parts[3]),
+                 last_seen: parseInt(parts[4])
+             });
+             this.saveLocalData(data);
+        }
+        else if (sqlUpper.includes("INTO TERRITORIES")) {
+            // VALUES ('id', NULL, strength, lat, lng, 'name')
+            const valuesStr = sql.substring(sql.indexOf("VALUES") + 6).trim().replace(/^\(|\)$/g, '');
+            const parts = valuesStr.split(',').map(s => s.trim().replace(/^'|'$/g, ''));
+            
+            // Check for duplicate before inserting
+            if (!data.territories.some((t: any) => t.id === parts[0])) {
+                data.territories.push({
+                    id: parts[0],
+                    owner_id: parts[1] === 'NULL' ? null : parts[1],
+                    strength: parseInt(parts[2]),
+                    lat: parseFloat(parts[3]),
+                    lng: parseFloat(parts[4]),
+                    name: parts[5]
+                });
+                this.saveLocalData(data);
+            }
+        }
     }
-    // INSERT territory
-    else if (sql.match(/^INSERT INTO territories/i)) {
-      const valuesMatch = sql.match(/VALUES \('([^']+)', NULL, ([0-9]+), ([0-9.-]+), ([0-9.-]+), '([^']+)'\)/);
-      if (valuesMatch) {
-        data.territories.push({
-          id: valuesMatch[1],
-          owner_id: null,
-          strength: parseInt(valuesMatch[2]),
-          lat: parseFloat(valuesMatch[3]),
-          lng: parseFloat(valuesMatch[4]),
-          name: valuesMatch[5]
-        });
-        this.saveLocalData(data);
-      }
-    }
-    // UPDATE player
-    else if (sql.match(/^UPDATE players/i)) {
-       const idMatch = sql.match(/id = '([^']+)'/);
-       if (idMatch) {
-         const pIndex = data.players.findIndex((p: any) => p.id === idMatch[1]);
-         if (pIndex >= 0) {
-           if (sql.includes("last_seen")) {
-             data.players[pIndex].last_seen = now;
-           }
-           if (sql.includes("money = money +")) {
-             const amount = parseFloat(sql.match(/money \+ ([0-9.]+)/)![1]);
-             data.players[pIndex].money += amount;
-           }
-           if (sql.includes("money = money -")) {
-             const amount = parseFloat(sql.match(/money \- ([0-9.]+)/)![1]);
-             data.players[pIndex].money -= amount;
-           }
-           this.saveLocalData(data);
-         }
-       }
-    }
-    // UPDATE territory
-    else if (sql.match(/^UPDATE territories/i)) {
-       const idMatch = sql.match(/id = '([^']+)'/);
-       if (idMatch) {
-         const tIndex = data.territories.findIndex((t: any) => t.id === idMatch[1]);
-         if (tIndex >= 0) {
-           if (sql.includes("owner_id =")) {
-             const ownerMatch = sql.match(/owner_id = '([^']+)'/);
-             if (ownerMatch) data.territories[tIndex].owner_id = ownerMatch[1];
-           }
-           if (sql.includes("strength =")) {
-             if (sql.includes("strength +")) {
-               const val = parseInt(sql.match(/strength \+ ([0-9]+)/)![1]);
-               data.territories[tIndex].strength += val;
-             } else {
-               const val = parseInt(sql.match(/strength = ([0-9]+)/)![1]);
-               data.territories[tIndex].strength = val;
+    // 3. UPDATE
+    else if (sqlUpper.startsWith("UPDATE")) {
+        // UPDATE territories SET ... WHERE ...
+        if (sqlUpper.includes("TERRITORIES")) {
+             const whereIndex = sqlUpper.indexOf("WHERE");
+             if (whereIndex !== -1) {
+                 const setPart = sql.substring(sqlUpper.indexOf("SET") + 3, whereIndex).trim();
+                 const wherePart = sql.substring(whereIndex + 5).trim();
+                 
+                 const idMatch = wherePart.match(/id = '([^']+)'/i);
+                 if (idMatch) {
+                     const tIndex = data.territories.findIndex((t: any) => t.id === idMatch[1]);
+                     if (tIndex !== -1) {
+                         // Split SET assignments by comma
+                         const assignments = setPart.split(',');
+                         assignments.forEach(assign => {
+                             const [col, valExpr] = assign.split('=').map(s => s.trim());
+                             
+                             if (col.toLowerCase() === 'owner_id') {
+                                 data.territories[tIndex].owner_id = valExpr.replace(/'/g, '');
+                             }
+                             else if (col.toLowerCase() === 'strength') {
+                                 const currentStrength = data.territories[tIndex].strength;
+                                 if (valExpr.includes('strength +')) {
+                                     const add = parseInt(valExpr.split('+')[1]);
+                                     data.territories[tIndex].strength = currentStrength + add;
+                                 } else if (valExpr.includes('strength -')) {
+                                     const sub = parseInt(valExpr.split('-')[1]);
+                                     // Handle MAX logic approximately
+                                     let newVal = currentStrength - sub;
+                                     if (valExpr.toUpperCase().includes("MAX")) {
+                                        newVal = Math.max(1, newVal);
+                                     }
+                                     data.territories[tIndex].strength = newVal;
+                                 } else if (valExpr.toUpperCase().includes("MAX")) {
+                                     // Simple parser for MAX(1, strength - X) logic used in airstrike
+                                     if(valExpr.includes('-')) {
+                                        const sub = parseInt(valExpr.split('-')[1]);
+                                        data.territories[tIndex].strength = Math.max(1, currentStrength - sub);
+                                     }
+                                 } else {
+                                     data.territories[tIndex].strength = parseInt(valExpr);
+                                 }
+                             }
+                         });
+                         this.saveLocalData(data);
+                     }
+                 }
              }
-           }
-           this.saveLocalData(data);
-         }
-       }
+        }
+        // UPDATE players
+        else if (sqlUpper.includes("PLAYERS")) {
+             const idMatch = sql.match(/id = '([^']+)'/i);
+             if (idMatch) {
+                 const pIndex = data.players.findIndex((p: any) => p.id === idMatch[1]);
+                 if (pIndex !== -1) {
+                     // Check for specific updates
+                     if (sql.includes("last_seen")) {
+                         data.players[pIndex].last_seen = now;
+                     }
+                     if (sql.includes("money = money +")) {
+                         const amount = parseFloat(sql.match(/money \+ ([0-9.]+)/)![1]);
+                         data.players[pIndex].money += amount;
+                     }
+                     if (sql.includes("money = money -")) {
+                         const amount = parseFloat(sql.match(/money \- ([0-9.]+)/)![1]);
+                         data.players[pIndex].money -= amount;
+                     }
+                     this.saveLocalData(data);
+                 }
+             }
+        }
     }
 
     return result;
@@ -311,6 +372,8 @@ export class GameService {
         const lat = centerLat + (x * GRID_SIZE);
         const lng = centerLng + (y * GRID_SIZE);
         await this.ensureTerritory(lat, lng);
+        // Small delay to prevent blocking UI on large grid generation
+        if (this.offlineMode) await new Promise(r => setTimeout(r, 10));
       }
     }
   }
@@ -418,22 +481,72 @@ export class GameService {
     if (itemId === 'recruit') cost = 50;
     if (itemId === 'fortify') cost = 100;
     if (itemId === 'sabotage') cost = 200;
+    if (itemId === 'shield') cost = 300;
+    if (itemId === 'airstrike') cost = 500;
 
     if (player.money < cost) {
       return { success: false, message: "Fundos Insuficientes" };
     }
 
+    // -- Skill Logic --
+
     if (itemId === 'recruit' && targetTerritoryId) {
       const t = this.state.territories[targetTerritoryId];
       if (t && t.ownerId === playerId) {
         await this.execSql(`UPDATE territories SET strength = strength + 10 WHERE id = '${targetTerritoryId}'`);
-        await this.execSql(`UPDATE players SET money = money - ${cost} WHERE id = '${playerId}'`);
-        return { success: true, message: "Tropas Recrutadas!" };
+      } else {
+          return { success: false, message: "Precisa ser seu território" };
       }
     }
 
+    else if (itemId === 'fortify' && targetTerritoryId) {
+       const t = this.state.territories[targetTerritoryId];
+       if (t && t.ownerId === playerId) {
+         await this.execSql(`UPDATE territories SET strength = strength + 20 WHERE id = '${targetTerritoryId}'`);
+       } else {
+          return { success: false, message: "Precisa ser seu território" };
+       }
+    }
+
+    else if (itemId === 'sabotage' && targetTerritoryId) {
+       const t = this.state.territories[targetTerritoryId];
+       if (t && t.ownerId !== playerId) {
+         await this.execSql(`UPDATE territories SET strength = MAX(1, strength - 15) WHERE id = '${targetTerritoryId}'`);
+       } else {
+         return { success: false, message: "Alvo deve ser inimigo" };
+       }
+    }
+
+    else if (itemId === 'airstrike') {
+        if (!targetTerritoryId) return { success: false, message: "Selecione um alvo" };
+        const t = this.state.territories[targetTerritoryId];
+        // Can bomb anyone, even neutral
+        if (t) {
+            await this.execSql(`UPDATE territories SET strength = MAX(1, strength - 50) WHERE id = '${targetTerritoryId}'`);
+        } else {
+            return { success: false, message: "Alvo inválido" };
+        }
+    }
+
+    else if (itemId === 'shield') {
+        if (!targetTerritoryId) return { success: false, message: "Selecione uma base" };
+        const t = this.state.territories[targetTerritoryId];
+        if (t && t.ownerId === playerId) {
+            await this.execSql(`UPDATE territories SET strength = strength + 50 WHERE id = '${targetTerritoryId}'`);
+        } else {
+            return { success: false, message: "Precisa ser seu território" };
+        }
+    }
+
+    // Pay costs
     await this.execSql(`UPDATE players SET money = money - ${cost} WHERE id = '${playerId}'`);
-    return { success: true, message: "Compra realizada" };
+    
+    let msg = "Compra realizada";
+    if (itemId === 'airstrike') msg = "Ataque Aéreo Confirmado!";
+    if (itemId === 'shield') msg = "Escudos Ativados!";
+    if (itemId === 'recruit') msg = "Tropas Recrutadas!";
+
+    return { success: true, message: msg };
   }
 
   public getLatestState(): GameState {
