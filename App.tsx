@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { GameStatus, Player, GameState, Language, ShopItem } from './types';
+import React, { useState, useEffect, useRef } from 'react';
+import { GameStatus, Player, GameState, Language, ShopItem, VisualEffect } from './types';
 import { getUserLocation } from './services/geoService';
 import { gameService } from './services/dbService';
 import MapComponent from './components/Map';
+import MapControls from './components/MapControls';
 import HUD from './components/HUD';
 import { Shop } from './components/Shop';
 import { Loader2, Crosshair, MapPin, Play } from 'lucide-react';
@@ -13,6 +14,8 @@ const App: React.FC = () => {
   const [username, setUsername] = useState('');
   const [player, setPlayer] = useState<Player | null>(null);
   const [language, setLanguage] = useState<Language>('pt-BR');
+  
+  // Game State
   const [gameState, setGameState] = useState<GameState>({
     territories: {},
     players: {},
@@ -23,9 +26,14 @@ const App: React.FC = () => {
     centerLng: 0,
     connected: false
   });
+  
+  // UI State
   const [message, setMessage] = useState<string | null>(null);
   const [isLocating, setIsLocating] = useState(false);
   const [showShop, setShowShop] = useState(false);
+  const [zoomLevel, setZoomLevel] = useState(16);
+  const [recenterTrigger, setRecenterTrigger] = useState(0); // Simple counter to trigger effects
+  const [visualEffects, setVisualEffects] = useState<VisualEffect[]>([]);
 
   const t = TRANSLATIONS[language];
 
@@ -38,17 +46,13 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Sync Loop (Polling for Multiplayer)
+  // Sync Loop
   useEffect(() => {
     if (status === GameStatus.PLAYING || status === GameStatus.SETUP) {
       const interval = setInterval(async () => {
-        // Sync with Cloud
         const syncedState = await gameService.syncState(player?.id || null);
-        
         setGameState(prev => {
-          // Sync player money which might change in background loop
           if (player && syncedState.players[player.id]) {
-            // Keep local reference updated
             setPlayer(prevP => {
                 if (!prevP) return null;
                 return { ...prevP, money: syncedState.players[player.id].money };
@@ -56,11 +60,11 @@ const App: React.FC = () => {
           }
           return {
             ...syncedState,
-            currentPlayerId: prev.currentPlayerId, // Preserve UI selection state
+            currentPlayerId: prev.currentPlayerId,
             selectedTerritoryId: prev.selectedTerritoryId 
           };
         });
-      }, 2000); // Poll every 2 seconds
+      }, 2000);
       return () => clearInterval(interval);
     }
   }, [status, player]);
@@ -71,36 +75,59 @@ const App: React.FC = () => {
       setIsLocating(true);
       getUserLocation()
         .then(loc => {
-           console.log("Found location:", loc);
-           // Initialize grid around this location
            gameService.initLocalGrid(loc.lat, loc.lng);
-           
-           // Determine the territory ID for this exact location
            const myTerritoryId = gameService.getGridId(loc.lat, loc.lng);
-           
            setGameState(prev => ({ 
              ...prev, 
              ...gameService.getLatestState(),
+             centerLat: loc.lat,
+             centerLng: loc.lng,
              selectedTerritoryId: myTerritoryId 
            }));
-           
+           setRecenterTrigger(prev => prev + 1);
            showToast(t.located, 'success');
         })
         .catch((e) => {
            console.error(e);
            showToast("GPS Error. Using fallback.", 'error');
-           // Fallback is handled inside gameService defaults usually, but we ensure grid init
-           gameService.initLocalGrid(-23.5505, -46.6333); // Default SP
-           setGameState(prev => ({ ...prev, ...gameService.getLatestState() }));
+           const defLat = -23.5505; 
+           const defLng = -46.6333;
+           gameService.initLocalGrid(defLat, defLng);
+           setGameState(prev => ({ 
+             ...prev, 
+             ...gameService.getLatestState(),
+             centerLat: defLat, 
+             centerLng: defLng 
+            }));
         })
         .finally(() => setIsLocating(false));
     }
   }, [status, t]);
 
+  // Cleanup effects
+  useEffect(() => {
+    if (visualEffects.length > 0) {
+      const timer = setTimeout(() => {
+        setVisualEffects(prev => prev.slice(1)); // Remove oldest
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [visualEffects]);
+
+  const addVisualEffect = (text: string, lat: number, lng: number, type: 'damage' | 'heal' | 'info') => {
+    setVisualEffects(prev => [...prev, {
+      id: Date.now() + Math.random(),
+      lat,
+      lng,
+      text,
+      type,
+      color: type === 'damage' ? 'red' : type === 'heal' ? 'green' : 'white'
+    }]);
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username) return;
-    
     try {
       const user = await gameService.login(username);
       setPlayer(user);
@@ -114,7 +141,6 @@ const App: React.FC = () => {
 
   const handleStartGame = async () => {
     if (!player || !gameState.selectedTerritoryId) return;
-    
     try {
       await gameService.captureTerritory(player.id, gameState.selectedTerritoryId);
       setStatus(GameStatus.PLAYING);
@@ -135,16 +161,32 @@ const App: React.FC = () => {
     const clickedTerritory = gameState.territories[clickedId]; 
     if (!clickedTerritory) return; 
 
-    // Gameplay Logic
+    // Visual feedback
     if (clickedTerritory.ownerId === player.id) {
       setGameState(prev => ({ ...prev, selectedTerritoryId: clickedId }));
     } else {
       if (gameState.selectedTerritoryId) {
-        // Attempt Attack
+        // Attack Logic
+        const source = gameState.territories[gameState.selectedTerritoryId];
         const result = await gameService.attackTerritory(player.id, gameState.selectedTerritoryId, clickedId);
-        showToast(result.message, result.success ? 'success' : 'error');
         
-        // Force immediate sync to show result
+        // Show combat text
+        if (source) {
+          if (result.success) {
+            addVisualEffect("VICTORY", clickedTerritory.lat, clickedTerritory.lng, 'heal');
+            addVisualEffect("-1", source.lat, source.lng, 'info');
+          } else {
+            if (result.message.includes("failed")) {
+               // Combat clash
+               addVisualEffect("DEFENDED", clickedTerritory.lat, clickedTerritory.lng, 'damage');
+               addVisualEffect("-1", source.lat, source.lng, 'damage');
+            } else {
+               showToast(result.message, 'error');
+            }
+          }
+        }
+
+        // Force Sync
         const newState = await gameService.syncState(player.id);
         setGameState(prev => ({
            ...prev, 
@@ -171,7 +213,13 @@ const App: React.FC = () => {
 
     const result = await gameService.purchaseUpgrade(player.id, item.id, targetId);
     showToast(result.message, result.success ? 'success' : 'error');
+    
     if (result.success) {
+      if (targetId && item.id === 'recruit') {
+         const t = gameState.territories[targetId];
+         if (t) addVisualEffect("+10", t.lat, t.lng, 'heal');
+      }
+
       setPlayer(prev => prev ? ({ ...prev, money: prev.money - item.cost }) : null);
       const newState = await gameService.syncState(player.id);
       setGameState(prev => ({ ...prev, ...newState }));
@@ -183,33 +231,59 @@ const App: React.FC = () => {
     setTimeout(() => setMessage(null), 3000);
   };
 
+  const handleRecenter = () => {
+    // If playing, center on selected territory, otherwise center on grid origin
+    if (gameState.selectedTerritoryId) {
+       const t = gameState.territories[gameState.selectedTerritoryId];
+       if (t) {
+         setGameState(prev => ({ ...prev, centerLat: t.lat, centerLng: t.lng }));
+         setRecenterTrigger(prev => prev + 1);
+         return;
+       }
+    }
+    // Fallback if no selection but grid exists
+    setRecenterTrigger(prev => prev + 1);
+  };
+
   return (
-    <div className="w-screen h-screen overflow-hidden bg-dark-bg text-white font-sans relative">
+    <div className="w-screen h-screen overflow-hidden bg-dark-bg text-white font-sans relative select-none">
       
-      {/* Background Map - Now Leaflet */}
+      {/* Background Map */}
       <div className={`transition-all duration-1000 w-full h-full ${status === GameStatus.PLAYING || status === GameStatus.SETUP ? 'opacity-100' : 'opacity-30 blur-sm'}`}>
-         {/* Only render map if we have a center, otherwise wait for init */}
          {(gameState.centerLat !== 0) && (
              <MapComponent 
                 centerLat={gameState.centerLat}
                 centerLng={gameState.centerLng}
+                zoomLevel={zoomLevel}
                 territories={gameState.territories}
                 players={gameState.players}
                 currentPlayerId={player?.id || null}
                 selectedTerritoryId={gameState.selectedTerritoryId}
+                visualEffects={visualEffects}
                 onTerritoryClick={handleTerritoryClick}
+                onZoomChange={setZoomLevel}
+                recenterTrigger={recenterTrigger}
              />
          )}
       </div>
 
+      {/* Map Controls (Zoom/Recenter) - Visible during Play/Setup */}
+      {(status === GameStatus.PLAYING || status === GameStatus.SETUP) && (
+        <MapControls 
+          zoom={zoomLevel}
+          onZoomChange={setZoomLevel}
+          onRecenter={handleRecenter}
+        />
+      )}
+
       {/* Login Screen */}
       {status === GameStatus.LOGIN && (
-        <div className="absolute inset-0 flex items-center justify-center z-[1000] pointer-events-auto">
-          <div className="bg-panel-bg p-8 rounded-2xl border border-neon-blue shadow-[0_0_50px_rgba(0,243,255,0.2)] backdrop-blur-xl max-w-md w-full mx-4 animate-in fade-in zoom-in duration-500">
-            <h1 className="text-4xl font-bold text-center mb-2 bg-gradient-to-r from-neon-blue to-neon-green bg-clip-text text-transparent">
+        <div className="absolute inset-0 flex items-center justify-center z-[1000] pointer-events-auto bg-black/40 backdrop-blur-sm">
+          <div className="bg-panel-bg p-8 rounded-2xl border border-neon-blue shadow-[0_0_50px_rgba(0,243,255,0.2)] max-w-md w-full mx-4 animate-in fade-in zoom-in duration-500">
+            <h1 className="text-4xl font-bold text-center mb-2 bg-gradient-to-r from-neon-blue to-neon-green bg-clip-text text-transparent tracking-widest">
               {t.gameTitle}
             </h1>
-            <p className="text-gray-400 text-center mb-8">{t.subTitle}</p>
+            <p className="text-gray-400 text-center mb-8 font-mono text-xs">{t.subTitle}</p>
             
             <form onSubmit={handleLogin} className="space-y-6">
               <div>
@@ -218,8 +292,8 @@ const App: React.FC = () => {
                   type="text" 
                   value={username}
                   onChange={e => setUsername(e.target.value)}
-                  className="w-full bg-black/50 border border-gray-700 rounded-lg p-3 text-white focus:border-neon-blue focus:outline-none transition"
-                  placeholder="..."
+                  className="w-full bg-black/50 border border-gray-700 rounded-lg p-3 text-white focus:border-neon-blue focus:outline-none focus:shadow-[0_0_15px_rgba(0,243,255,0.3)] transition font-mono"
+                  placeholder="CODENAME"
                   required
                   maxLength={12}
                 />
@@ -231,12 +305,10 @@ const App: React.FC = () => {
                 {t.loginBtn}
               </button>
               
-              <div className="flex justify-center gap-4 text-sm text-gray-500 mt-4">
-                 <button type="button" onClick={() => setLanguage('pt-BR')} className={language === 'pt-BR' ? 'text-neon-blue' : ''}>PT</button>
-                 <button type="button" onClick={() => setLanguage('en')} className={language === 'en' ? 'text-neon-blue' : ''}>EN</button>
-                 <button type="button" onClick={() => setLanguage('es')} className={language === 'es' ? 'text-neon-blue' : ''}>ES</button>
-                 <button type="button" onClick={() => setLanguage('de')} className={language === 'de' ? 'text-neon-blue' : ''}>DE</button>
-                 <button type="button" onClick={() => setLanguage('zh')} className={language === 'zh' ? 'text-neon-blue' : ''}>CN</button>
+              <div className="flex justify-center gap-4 text-sm text-gray-500 mt-4 border-t border-gray-800 pt-4">
+                 <button type="button" onClick={() => setLanguage('pt-BR')} className={language === 'pt-BR' ? 'text-neon-blue font-bold' : 'hover:text-gray-300'}>PT</button>
+                 <button type="button" onClick={() => setLanguage('en')} className={language === 'en' ? 'text-neon-blue font-bold' : 'hover:text-gray-300'}>EN</button>
+                 <button type="button" onClick={() => setLanguage('es')} className={language === 'es' ? 'text-neon-blue font-bold' : 'hover:text-gray-300'}>ES</button>
               </div>
             </form>
           </div>
@@ -245,8 +317,8 @@ const App: React.FC = () => {
 
       {/* Setup / Location Screen */}
       {status === GameStatus.SETUP && (
-         <div className="absolute bottom-10 left-0 right-0 flex justify-center z-[1000] px-4">
-           <div className="bg-panel-bg border border-neon-green/50 backdrop-blur-xl p-6 rounded-2xl shadow-2xl w-full max-w-lg flex flex-col gap-4 animate-in slide-in-from-bottom duration-500">
+         <div className="absolute bottom-24 md:bottom-10 left-0 right-0 flex justify-center z-[1000] px-4 pointer-events-none">
+           <div className="pointer-events-auto bg-panel-bg border border-neon-green/50 backdrop-blur-xl p-6 rounded-2xl shadow-2xl w-full max-w-lg flex flex-col gap-4 animate-in slide-in-from-bottom duration-500">
               <div className="flex items-start justify-between">
                 <div>
                    <h2 className="text-neon-green font-bold text-xl flex items-center gap-2">
@@ -259,7 +331,7 @@ const App: React.FC = () => {
               </div>
 
               {isLocating && (
-                <div className="flex items-center gap-2 text-neon-blue text-sm animate-pulse">
+                <div className="flex items-center gap-2 text-neon-blue text-sm animate-pulse font-mono">
                    <Loader2 className="animate-spin" size={16} /> {t.scanning}
                 </div>
               )}
@@ -269,7 +341,7 @@ const App: React.FC = () => {
                  disabled={!gameState.selectedTerritoryId}
                  className={`w-full py-4 rounded-lg font-bold text-lg flex items-center justify-center gap-2 transition-all ${
                     gameState.selectedTerritoryId 
-                    ? "bg-neon-green text-black hover:bg-green-400 shadow-lg shadow-green-500/20" 
+                    ? "bg-neon-green text-black hover:bg-green-400 shadow-lg shadow-green-500/20 transform hover:scale-[1.02]" 
                     : "bg-gray-800 text-gray-500 cursor-not-allowed"
                  }`}
               >
@@ -305,10 +377,10 @@ const App: React.FC = () => {
 
       {/* Toast Notification */}
       {message && (
-        <div className="absolute top-24 left-1/2 -translate-x-1/2 pointer-events-none z-[1100] w-max max-w-[90vw]">
-           <div className="bg-black/90 border border-gray-600 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 animate-bounce">
-              <Crosshair size={20} className="text-neon-red" />
-              <span className="font-mono text-sm">{message}</span>
+        <div className="absolute top-24 left-1/2 -translate-x-1/2 pointer-events-none z-[1100] w-max max-w-[90vw] animate-in slide-in-from-top-4 fade-in duration-300">
+           <div className="bg-black/80 backdrop-blur-md border border-neon-blue/30 text-white px-6 py-3 rounded-full shadow-[0_0_20px_rgba(0,243,255,0.15)] flex items-center gap-3">
+              <Crosshair size={20} className="text-neon-blue" />
+              <span className="font-mono text-sm tracking-wide">{message}</span>
            </div>
         </div>
       )}

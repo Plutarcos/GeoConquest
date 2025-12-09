@@ -48,3 +48,12 @@ export interface ShopItem {
   effect: string;
   icon: string;
 }
+
+export interface VisualEffect {
+  id: number;
+  lat: number;
+  lng: number;
+  text: string;
+  color: string; // 'red', 'green', 'white'
+  type: 'damage' | 'heal' | 'info';
+}
