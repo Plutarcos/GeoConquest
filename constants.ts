@@ -1,3 +1,4 @@
+
 // Leaflet Tile Layer (Dark Matter)
 export const MAP_TILE_URL = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
 export const MAP_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
@@ -24,9 +25,31 @@ export const INCOME_PER_TERRITORY = 5;
 export const GROWTH_RATE_MS = 2000; 
 export const MAX_STRENGTH = 5000;
 
+// SQLite Cloud HTTP Configuration
 export const DB_CONFIG = {
-  connectionString: "sqlitecloud://cahitlmmvk.g1.sqlite.cloud:8860/auth.sqlitecloud?apikey=t4RhYseJkrslILKbJELwkbeOiLEDIPJRByyRLRavpaU"
+  host: "cahitlmmvk.g1.sqlite.cloud",
+  port: 8860,
+  apiKey: "t4RhYseJkrslILKbJELwkbeOiLEDIPJRByyRLRavpaU",
+  database: "geoconquest.sqlite" // Nome do arquivo DB na nuvem
 };
+
+export const SQL_INIT = [
+  `CREATE TABLE IF NOT EXISTS players (
+    id TEXT PRIMARY KEY, 
+    username TEXT, 
+    color TEXT, 
+    money REAL, 
+    last_seen INTEGER
+  );`,
+  `CREATE TABLE IF NOT EXISTS territories (
+    id TEXT PRIMARY KEY, 
+    owner_id TEXT, 
+    strength INTEGER, 
+    lat REAL, 
+    lng REAL,
+    name TEXT
+  );`
+];
 
 export const SHOP_ITEMS = [
   { id: 'recruit', cost: 50, nameKey: 'recruit_troops', effect: 'strength_10', icon: 'UserPlus' },
@@ -64,7 +87,10 @@ export const TRANSLATIONS = {
     neutral: "Neutro",
     enemy: "Inimigo",
     live: "Rede Local",
-    active: "Conectado"
+    active: "Conectado",
+    chat: "Comunicação",
+    sendMessage: "Enviar mensagem...",
+    newMsg: "Nova Msg"
   },
   'en': {
     gameTitle: "GEOCONQUEST",
@@ -95,7 +121,10 @@ export const TRANSLATIONS = {
     neutral: "Neutral",
     enemy: "Enemy",
     live: "Local Net",
-    active: "Connected"
+    active: "Connected",
+    chat: "Comms",
+    sendMessage: "Send message...",
+    newMsg: "New Msg"
   },
   'es': {
     gameTitle: "GEOCONQUISTA",
@@ -126,7 +155,10 @@ export const TRANSLATIONS = {
     neutral: "Neutral",
     enemy: "Enemigo",
     live: "Red Local",
-    active: "Conectado"
+    active: "Conectado",
+    chat: "Coms",
+    sendMessage: "Enviar mensaje...",
+    newMsg: "Nuevo"
   },
   'de': {
     gameTitle: "GEOEROBERUNG",
@@ -157,7 +189,10 @@ export const TRANSLATIONS = {
     neutral: "Neutral",
     enemy: "Feind",
     live: "Lokalnetz",
-    active: "Verbunden"
+    active: "Verbunden",
+    chat: "Komm",
+    sendMessage: "Nachricht senden...",
+    newMsg: "Neu"
   },
   'zh': {
     gameTitle: "地缘征服",
@@ -188,6 +223,9 @@ export const TRANSLATIONS = {
     neutral: "中立",
     enemy: "敌人",
     live: "本地网络",
-    active: "已连接"
+    active: "已连接",
+    chat: "通讯",
+    sendMessage: "发送消息...",
+    newMsg: "新消息"
   }
 };

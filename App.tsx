@@ -1,11 +1,13 @@
+
 import React, { useState, useEffect, useRef } from 'react';
-import { GameStatus, Player, GameState, Language, ShopItem, VisualEffect } from './types';
+import { GameStatus, Player, GameState, Language, ShopItem, VisualEffect, ChatMessage } from './types';
 import { getUserLocation } from './services/geoService';
 import { gameService } from './services/dbService';
 import MapComponent from './components/Map';
 import MapControls from './components/MapControls';
 import HUD from './components/HUD';
 import { Shop } from './components/Shop';
+import Chat from './components/Chat';
 import { Loader2, Crosshair, MapPin, Play } from 'lucide-react';
 import { TRANSLATIONS } from './constants';
 
@@ -31,11 +33,23 @@ const App: React.FC = () => {
   const [message, setMessage] = useState<string | null>(null);
   const [isLocating, setIsLocating] = useState(false);
   const [showShop, setShowShop] = useState(false);
+  const [showChat, setShowChat] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(16);
-  const [recenterTrigger, setRecenterTrigger] = useState(0); // Simple counter to trigger effects
+  const [recenterTrigger, setRecenterTrigger] = useState(0); 
   const [visualEffects, setVisualEffects] = useState<VisualEffect[]>([]);
+  
+  // Chat State
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [hasUnread, setHasUnread] = useState(false);
 
   const t = TRANSLATIONS[language];
+
+  // Initialize DB
+  useEffect(() => {
+    gameService.initDatabase().then(() => {
+      console.log("DB Ready");
+    }).catch(e => console.error("DB Init failed", e));
+  }, []);
 
   // Check for existing session
   useEffect(() => {
@@ -74,12 +88,18 @@ const App: React.FC = () => {
     if (status === GameStatus.SETUP) {
       setIsLocating(true);
       getUserLocation()
-        .then(loc => {
-           gameService.initLocalGrid(loc.lat, loc.lng);
+        .then(async (loc) => {
+           // Gera grid local, isso vai criar os territórios no DB se não existirem
+           await gameService.initLocalGrid(loc.lat, loc.lng);
+           
+           // Força sincronização imediata para pegar o estado real do banco
+           const latestState = await gameService.syncState(player?.id || null);
+           
            const myTerritoryId = gameService.getGridId(loc.lat, loc.lng);
+           
            setGameState(prev => ({ 
              ...prev, 
-             ...gameService.getLatestState(),
+             ...latestState,
              centerLat: loc.lat,
              centerLng: loc.lng,
              selectedTerritoryId: myTerritoryId 
@@ -125,6 +145,17 @@ const App: React.FC = () => {
     }]);
   };
 
+  const addChatMessage = (text: string, sender: string = "System", isSystem: boolean = false) => {
+    setChatMessages(prev => [...prev, {
+      id: Date.now().toString() + Math.random(),
+      sender,
+      text,
+      timestamp: Date.now(),
+      isSystem
+    }]);
+    if (!showChat) setHasUnread(true);
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username) return;
@@ -133,9 +164,10 @@ const App: React.FC = () => {
       setPlayer(user);
       localStorage.setItem('geoconquest_user', JSON.stringify(user));
       setStatus(GameStatus.SETUP);
+      addChatMessage(`Agent ${user.username} connected.`, "System", true);
     } catch (error) {
       console.error(error);
-      setMessage("Login failed.");
+      setMessage("Login failed. Check Connection.");
     }
   };
 
@@ -145,6 +177,7 @@ const App: React.FC = () => {
       await gameService.captureTerritory(player.id, gameState.selectedTerritoryId);
       setStatus(GameStatus.PLAYING);
       showToast(t.startConquest, 'success');
+      addChatMessage("Sector occupation initiated.", "System", true);
     } catch (e) {
       showToast("Error starting game", 'error');
     }
@@ -175,9 +208,9 @@ const App: React.FC = () => {
           if (result.success) {
             addVisualEffect("VICTORY", clickedTerritory.lat, clickedTerritory.lng, 'heal');
             addVisualEffect("-1", source.lat, source.lng, 'info');
+            addChatMessage(`${player.username} conquered ${clickedTerritory.name}!`, "System", true);
           } else {
             if (result.message.includes("failed")) {
-               // Combat clash
                addVisualEffect("DEFENDED", clickedTerritory.lat, clickedTerritory.lng, 'damage');
                addVisualEffect("-1", source.lat, source.lng, 'damage');
             } else {
@@ -186,7 +219,7 @@ const App: React.FC = () => {
           }
         }
 
-        // Force Sync
+        // Force Sync immediately
         const newState = await gameService.syncState(player.id);
         setGameState(prev => ({
            ...prev, 
@@ -232,7 +265,6 @@ const App: React.FC = () => {
   };
 
   const handleRecenter = () => {
-    // If playing, center on selected territory, otherwise center on grid origin
     if (gameState.selectedTerritoryId) {
        const t = gameState.territories[gameState.selectedTerritoryId];
        if (t) {
@@ -241,7 +273,6 @@ const App: React.FC = () => {
          return;
        }
     }
-    // Fallback if no selection but grid exists
     setRecenterTrigger(prev => prev + 1);
   };
 
@@ -267,7 +298,7 @@ const App: React.FC = () => {
          )}
       </div>
 
-      {/* Map Controls (Zoom/Recenter) - Visible during Play/Setup */}
+      {/* Map Controls */}
       {(status === GameStatus.PLAYING || status === GameStatus.SETUP) && (
         <MapControls 
           zoom={zoomLevel}
@@ -315,7 +346,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Setup / Location Screen */}
+      {/* Setup Screen */}
       {status === GameStatus.SETUP && (
          <div className="absolute bottom-24 md:bottom-10 left-0 right-0 flex justify-center z-[1000] px-4 pointer-events-none">
            <div className="pointer-events-auto bg-panel-bg border border-neon-green/50 backdrop-blur-xl p-6 rounded-2xl shadow-2xl w-full max-w-lg flex flex-col gap-4 animate-in slide-in-from-bottom duration-500">
@@ -358,14 +389,19 @@ const App: React.FC = () => {
           territories={gameState.territories} 
           language={language}
           connected={gameState.connected}
+          hasUnreadMessages={hasUnread}
           onLanguageChange={setLanguage}
           onToggleShop={() => setShowShop(true)}
+          onToggleChat={() => {
+             setShowChat(!showChat);
+             if (!showChat) setHasUnread(false);
+          }}
           onReset={() => gameService.resetGame()}
           onLogout={() => window.location.reload()}
         />
       )}
 
-      {/* Shop Modal */}
+      {/* Shop */}
       {showShop && player && (
         <Shop 
           language={language}
@@ -375,7 +411,19 @@ const App: React.FC = () => {
         />
       )}
 
-      {/* Toast Notification */}
+      {/* Chat */}
+      {status === GameStatus.PLAYING && player && (
+         <Chat 
+           messages={chatMessages}
+           player={player}
+           language={language}
+           isOpen={showChat}
+           onClose={() => setShowChat(false)}
+           onSendMessage={(text) => addChatMessage(text, player.username)}
+         />
+      )}
+
+      {/* Notifications */}
       {message && (
         <div className="absolute top-24 left-1/2 -translate-x-1/2 pointer-events-none z-[1100] w-max max-w-[90vw] animate-in slide-in-from-top-4 fade-in duration-300">
            <div className="bg-black/80 backdrop-blur-md border border-neon-blue/30 text-white px-6 py-3 rounded-full shadow-[0_0_20px_rgba(0,243,255,0.15)] flex items-center gap-3">

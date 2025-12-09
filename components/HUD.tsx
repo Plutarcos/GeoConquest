@@ -1,6 +1,6 @@
 import React from 'react';
 import { Player, Territory, Language } from '../types';
-import { Globe, ShieldAlert, RefreshCw, ShoppingCart, DollarSign, LogOut } from 'lucide-react';
+import { Globe, ShieldAlert, RefreshCw, ShoppingCart, DollarSign, LogOut, MessageSquare } from 'lucide-react';
 import { TRANSLATIONS } from '../constants';
 
 interface HUDProps {
@@ -8,8 +8,10 @@ interface HUDProps {
   territories: Record<string, Territory>;
   language: Language;
   connected: boolean;
+  hasUnreadMessages: boolean;
   onLanguageChange: (lang: Language) => void;
   onToggleShop: () => void;
+  onToggleChat: () => void;
   onReset: () => void;
   onLogout: () => void;
 }
@@ -19,8 +21,10 @@ const HUD: React.FC<HUDProps> = ({
   territories, 
   language, 
   connected,
+  hasUnreadMessages,
   onLanguageChange,
   onToggleShop,
+  onToggleChat,
   onReset, 
   onLogout 
 }) => {
@@ -85,6 +89,21 @@ const HUD: React.FC<HUDProps> = ({
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[500] w-full max-w-md px-4 pointer-events-auto">
         <div className="bg-panel-bg backdrop-blur-xl border border-gray-700/50 rounded-2xl p-2 flex items-center justify-around shadow-2xl">
             
+            <button 
+              onClick={onToggleChat}
+              className="flex flex-col items-center gap-1 p-2 text-blue-400 hover:text-blue-200 transition active:scale-95 group relative"
+            >
+              <div className="bg-blue-500/20 p-2 rounded-lg group-hover:bg-blue-500/40 border border-transparent group-hover:border-blue-500/50 transition">
+                <MessageSquare size={24} />
+                {hasUnreadMessages && (
+                  <span className="absolute top-2 right-4 w-2 h-2 bg-neon-red rounded-full animate-pulse shadow-[0_0_5px_red]"></span>
+                )}
+              </div>
+              <span className="text-[10px] font-bold uppercase tracking-wide">{t.chat}</span>
+            </button>
+
+            <div className="w-px h-8 bg-gray-700"></div>
+
             <button 
               onClick={onToggleShop}
               className="flex flex-col items-center gap-1 p-2 text-yellow-400 hover:text-yellow-200 transition active:scale-95 group"

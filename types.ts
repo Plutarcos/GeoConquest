@@ -1,3 +1,4 @@
+
 export interface Player {
   id: string;
   username: string;
@@ -56,4 +57,18 @@ export interface VisualEffect {
   text: string;
   color: string; // 'red', 'green', 'white'
   type: 'damage' | 'heal' | 'info';
+}
+
+export interface ChatMessage {
+  id: string;
+  sender: string;
+  text: string;
+  timestamp: number;
+  isSystem?: boolean;
+}
+
+export interface SqliteCloudResponse {
+  data: any[];
+  columns?: string[];
+  status: string;
 }

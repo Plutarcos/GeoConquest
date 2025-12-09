@@ -1,25 +1,16 @@
-import { GameState, Player, Territory } from '../types';
-import { INITIAL_STRENGTH, INITIAL_MONEY, INCOME_PER_TERRITORY, GRID_SIZE, DB_CONFIG } from '../constants';
-import { Database } from '@sqlitecloud/drivers';
 
-const STORAGE_KEY = 'geoconquest_state_v5_cloud';
+import { GameState, Player, Territory, SqliteCloudResponse } from '../types';
+import { INITIAL_STRENGTH, INITIAL_MONEY, INCOME_PER_TERRITORY, GRID_SIZE, DB_CONFIG, SQL_INIT } from '../constants';
 
 export class GameService {
   private state: GameState;
-  private db: Database | null = null;
-  private useLocalFallback: boolean = false;
-  
-  constructor() {
-    this.state = this.loadLocalState();
-    this.initCloudDB();
-  }
+  private endpoint: string;
 
-  private loadLocalState(): GameState {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      return JSON.parse(saved);
-    }
-    return {
+  constructor() {
+    // Inicializa o endpoint HTTP v2 do SQLiteCloud
+    this.endpoint = `https://${DB_CONFIG.host}:${DB_CONFIG.port}/v2/webeditor/sql`;
+
+    this.state = {
       territories: {},
       players: {},
       currentPlayerId: null,
@@ -29,115 +20,150 @@ export class GameService {
       centerLng: 0,
       connected: false
     };
+
+    // Iniciar loop de renda passiva (simulação simplificada, em prod idealmente seria server-side)
+    setInterval(() => this.passiveIncomeLoop(), 5000);
   }
 
-  private saveLocalState() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
-  }
+  // --- Helpers de Banco de Dados (HTTP) ---
 
-  // --- SQLite Cloud Integration ---
-
-  private async initCloudDB() {
+  private async execSql(sql: string): Promise<any[]> {
     try {
-      this.db = new Database(DB_CONFIG.connectionString);
-      
-      // Test connection
-      await this.db.sql('SELECT 1');
-      console.log("Connected to SQLiteCloud");
-      this.state.connected = true;
+      const response = await fetch(this.endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${DB_CONFIG.apiKey}`
+        },
+        body: JSON.stringify({
+          sql: sql,
+          database: DB_CONFIG.database
+        })
+      });
 
-      // Create Tables if not exist
-      await this.db.sql(`
-        CREATE TABLE IF NOT EXISTS players (
-          id TEXT PRIMARY KEY, 
-          username TEXT, 
-          color TEXT, 
-          money INTEGER, 
-          last_seen INTEGER
-        );
-      `);
-      
-      await this.db.sql(`
-        CREATE TABLE IF NOT EXISTS territories (
-          id TEXT PRIMARY KEY, 
-          name TEXT, 
-          ownerId TEXT, 
-          strength INTEGER, 
-          lat REAL, 
-          lng REAL
-        );
-      `);
-
-    } catch (error) {
-      console.warn("Failed to connect to SQLiteCloud (using local fallback):", error);
-      this.useLocalFallback = true;
-      this.state.connected = false;
-    }
-  }
-
-  public async syncState(currentPlayerId: string | null) {
-    if (this.useLocalFallback || !this.db) {
-      this.simulateGameLoop();
-      return this.state;
-    }
-
-    try {
-      // 1. Update heartbeat for current player
-      if (currentPlayerId) {
-        await this.db.sql`UPDATE players SET last_seen = ${Date.now()} WHERE id = ${currentPlayerId}`;
+      if (!response.ok) {
+        throw new Error(`DB Error: ${response.statusText}`);
       }
 
-      // 2. Fetch all territories
-      const territoriesData = await this.db.sql('SELECT * FROM territories');
-      const playersData = await this.db.sql('SELECT * FROM players');
-
-      // 3. Merge into local state
-      (territoriesData as any[]).forEach(row => {
-        this.state.territories[row.id] = {
-          id: row.id,
-          name: row.name,
-          ownerId: row.ownerId,
-          strength: row.strength,
-          lat: row.lat,
-          lng: row.lng
-        };
-      });
-
-      (playersData as any[]).forEach(row => {
-        this.state.players[row.id] = {
-          id: row.id,
-          username: row.username,
-          color: row.color,
-          money: row.money,
-          lastSeen: row.last_seen
-        };
-      });
-
-      this.state.connected = true;
-      this.saveLocalState();
-    } catch (e) {
-      console.error("Sync error:", e);
-      this.state.connected = false;
-      this.useLocalFallback = true; // Temporary fallback on error
+      const data: SqliteCloudResponse = await response.json();
+      
+      // A API retorna um array de resultados. O formato varia dependendo do comando.
+      // Geralmente data.data contém as linhas para SELECT
+      if (data.data) {
+        // Transformar formato de array de arrays para array de objetos baseado nas colunas
+        if (data.columns && data.data.length > 0) {
+          return data.data.map((row: any[]) => {
+            const obj: any = {};
+            data.columns.forEach((col: string, index: number) => {
+              obj[col] = row[index];
+            });
+            return obj;
+          });
+        }
+        return data.data; // Retorno bruto se não houver colunas
+      }
+      
+      return [];
+    } catch (error) {
+      console.error("SQL Exec failed:", error);
+      return [];
     }
-    
-    return this.state;
   }
 
-  // --- Game Logic ---
+  public async initDatabase() {
+    console.log("Initializing Cloud DB...");
+    for (const sql of SQL_INIT) {
+      await this.execSql(sql);
+    }
+    this.state.connected = true;
+    console.log("Cloud DB Initialized.");
+  }
 
-  public initLocalGrid(centerLat: number, centerLng: number) {
+  // --- Lógica do Jogo ---
+
+  public async login(username: string): Promise<Player> {
+    const id = `user_${username.replace(/\s+/g, '_').toLowerCase()}`;
+    const color = this.getRandomColor();
+    const now = Date.now();
+
+    // Tenta inserir ou ignorar se já existir
+    // Nota: SQLiteCloud HTTP pode não suportar múltiplas queries complexas de uma vez, fazemos simples
+    
+    // Verificar se existe
+    const existing = await this.execSql(`SELECT * FROM players WHERE id = '${id}'`);
+    
+    if (existing && existing.length > 0) {
+      // Atualizar last_seen
+      await this.execSql(`UPDATE players SET last_seen = ${now} WHERE id = '${id}'`);
+      const p = existing[0];
+      // Garantir tipos corretos
+      return {
+        id: p.id,
+        username: p.username,
+        color: p.color,
+        money: parseFloat(p.money),
+        lastSeen: p.last_seen
+      };
+    } else {
+      // Criar novo
+      await this.execSql(`INSERT INTO players (id, username, color, money, last_seen) VALUES ('${id}', '${username}', '${color}', ${INITIAL_MONEY}, ${now})`);
+      return {
+        id,
+        username,
+        color,
+        money: INITIAL_MONEY,
+        lastSeen: now
+      };
+    }
+  }
+
+  public async syncState(currentPlayerId: string | null): Promise<GameState> {
+    // 1. Fetch Players
+    const playersData = await this.execSql(`SELECT * FROM players`);
+    const playersMap: Record<string, Player> = {};
+    playersData.forEach((p: any) => {
+      playersMap[p.id] = {
+        id: p.id,
+        username: p.username,
+        color: p.color,
+        money: parseFloat(p.money),
+        lastSeen: p.last_seen
+      };
+    });
+
+    // 2. Fetch Territories
+    const terrData = await this.execSql(`SELECT * FROM territories`);
+    const terrMap: Record<string, Territory> = {};
+    terrData.forEach((t: any) => {
+      terrMap[t.id] = {
+        id: t.id,
+        ownerId: t.owner_id,
+        strength: parseInt(t.strength),
+        lat: parseFloat(t.lat),
+        lng: parseFloat(t.lng),
+        name: t.name
+      };
+    });
+
+    // Atualizar estado local
+    this.state.players = playersMap;
+    this.state.territories = terrMap;
+    this.state.connected = true;
+
+    return { ...this.state };
+  }
+
+  // Gera o grid localmente, mas verifica/salva no DB
+  public async initLocalGrid(centerLat: number, centerLng: number) {
     this.state.centerLat = centerLat;
     this.state.centerLng = centerLng;
 
     const radius = 3; 
-    const promises = [];
-
     for (let x = -radius; x <= radius; x++) {
       for (let y = -radius; y <= radius; y++) {
         const lat = centerLat + (x * GRID_SIZE);
         const lng = centerLng + (y * GRID_SIZE);
-        promises.push(this.ensureTerritory(lat, lng));
+        await this.ensureTerritory(lat, lng);
       }
     }
   }
@@ -154,108 +180,51 @@ export class GameService {
 
   public async ensureTerritory(lat: number, lng: number): Promise<Territory> {
     const id = this.getGridId(lat, lng);
-    
-    // Check local cache first
+    const snappedLat = this.snapToGrid(lat);
+    const snappedLng = this.snapToGrid(lng);
+    const name = `Sector ${id.replace('_', ':')}`;
+
+    // Verificar se já existe no estado local sincronizado
     if (this.state.territories[id]) {
-        return this.state.territories[id];
+      return this.state.territories[id];
     }
 
-    const t: Territory = {
-        id,
-        name: `Sector ${id.replace('_', ':')}`,
-        ownerId: null,
-        strength: Math.floor(Math.random() * 20) + 5,
-        lat: this.snapToGrid(lat),
-        lng: this.snapToGrid(lng)
-    };
-
-    this.state.territories[id] = t;
-
-    // Push to DB if connected
-    if (!this.useLocalFallback && this.db) {
-        try {
-            await this.db.sql`INSERT OR IGNORE INTO territories (id, name, ownerId, strength, lat, lng) VALUES (${t.id}, ${t.name}, ${t.ownerId}, ${t.strength}, ${t.lat}, ${t.lng})`;
-        } catch (e) { console.warn("DB Insert fail", e); }
-    }
-
-    return t;
-  }
-
-  public async login(username: string): Promise<Player> {
-    const id = `user_${username.replace(/\s+/g, '_').toLowerCase()}`;
+    // Tentar criar no DB (INSERT OR IGNORE)
+    const strength = Math.floor(Math.random() * 20) + 5;
+    const sql = `INSERT INTO territories (id, owner_id, strength, lat, lng, name) 
+                 SELECT '${id}', NULL, ${strength}, ${snappedLat}, ${snappedLng}, '${name}'
+                 WHERE NOT EXISTS(SELECT 1 FROM territories WHERE id = '${id}')`;
     
-    let player: Player = {
-        id,
-        username,
-        color: this.getRandomColor(),
-        money: INITIAL_MONEY,
-        lastSeen: Date.now()
+    await this.execSql(sql);
+
+    // Retorna um objeto temporário até o próximo sync
+    const t: Territory = {
+      id,
+      name,
+      ownerId: null,
+      strength,
+      lat: snappedLat,
+      lng: snappedLng
     };
-
-    if (!this.useLocalFallback && this.db) {
-        // Try fetch existing
-        const res = await this.db.sql`SELECT * FROM players WHERE id = ${id}`;
-        if (Array.isArray(res) && res.length > 0) {
-            const row = res[0] as any;
-            player = {
-                id: row.id,
-                username: row.username,
-                color: row.color,
-                money: row.money,
-                lastSeen: row.last_seen
-            };
-        } else {
-            // Register new
-            await this.db.sql`INSERT INTO players (id, username, color, money, last_seen) VALUES (${player.id}, ${player.username}, ${player.color}, ${player.money}, ${player.lastSeen})`;
-        }
-    }
-
-    this.state.players[id] = player;
-    this.saveLocalState();
-    return player;
-  }
-
-  private getRandomColor() {
-      const colors = ['#0aff00', '#00f3ff', '#ff003c', '#eab308', '#ec4899', '#8b5cf6'];
-      return colors[Math.floor(Math.random() * colors.length)];
+    return t;
   }
 
   public async captureTerritory(playerId: string, territoryId: string) {
     const t = this.state.territories[territoryId];
     if (t) {
-      t.ownerId = playerId;
-      t.strength = INITIAL_STRENGTH;
-      this.updateTerritory(t);
-      this.generateNeighbors(t.lat, t.lng);
+      // Update DB
+      await this.execSql(`UPDATE territories SET owner_id = '${playerId}', strength = ${INITIAL_STRENGTH} WHERE id = '${territoryId}'`);
+      await this.generateNeighbors(t.lat, t.lng);
     }
   }
 
-  private async updateTerritory(t: Territory) {
-      if (!this.useLocalFallback && this.db) {
-          try {
-             await this.db.sql`UPDATE territories SET ownerId = ${t.ownerId}, strength = ${t.strength} WHERE id = ${t.id}`;
-          } catch(e) { console.warn("Update failed", e); }
-      }
-      this.saveLocalState();
-  }
-
-  private updatePlayer(p: Player) {
-      if (!this.useLocalFallback && this.db) {
-          try {
-              // Note: using raw string interpolation for simplicity in this demo, but parameters are safer
-              this.db.sql`UPDATE players SET money = ${p.money}, last_seen = ${Date.now()} WHERE id = ${p.id}`;
-          } catch(e) {}
-      }
-      this.saveLocalState();
-  }
-
-  private generateNeighbors(lat: number, lng: number) {
+  private async generateNeighbors(lat: number, lng: number) {
      const offsets = [[0,1], [0,-1], [1,0], [-1,0]];
-     offsets.forEach(([ox, oy]) => {
+     for (const [ox, oy] of offsets) {
         const nLat = lat + (ox * GRID_SIZE);
         const nLng = lng + (oy * GRID_SIZE);
-        this.ensureTerritory(nLat, nLng);
-     });
+        await this.ensureTerritory(nLat, nLng);
+     }
   }
 
   public isAdjacent(t1: Territory, t2: Territory): boolean {
@@ -266,46 +235,45 @@ export class GameService {
   }
 
   public async attackTerritory(attackerId: string, sourceId: string, targetId: string): Promise<{success: boolean, message: string}> {
-    // Refresh state before attacking to prevent conflicts
-    await this.syncState(attackerId);
-
+    // Precisamos garantir que temos o estado mais recente antes de calcular o ataque
+    // Para UX rápida, usamos o estado local, mas o DB é a verdade.
+    
     const source = this.state.territories[sourceId];
     const target = this.state.territories[targetId];
 
-    if (!source || !target) return { success: false, message: "Invalid territory" };
-    if (source.ownerId !== attackerId) return { success: false, message: "You don't own the source!" };
-    if (target.ownerId === attackerId) return { success: false, message: "You already own this!" };
+    if (!source || !target) return { success: false, message: "Território inválido" };
+    if (source.ownerId !== attackerId) return { success: false, message: "Você não possui a base!" };
+    if (target.ownerId === attackerId) return { success: false, message: "Já é seu!" };
     
     if (!this.isAdjacent(source, target)) {
-      return { success: false, message: "Target is not adjacent!" };
+      return { success: false, message: "Alvo muito distante!" };
     }
 
-    if (source.strength <= 1) return { success: false, message: "Not enough troops!" };
+    if (source.strength <= 1) return { success: false, message: "Tropas insuficientes!" };
 
     const attackPower = source.strength - 1; 
     const defensePower = target.strength;
 
     if (attackPower > defensePower) {
       const remaining = attackPower - defensePower;
-      source.strength = 1;
-      target.strength = remaining;
-      target.ownerId = attackerId;
-      this.updateTerritory(source);
-      this.updateTerritory(target);
-      this.generateNeighbors(target.lat, target.lng);
-      return { success: true, message: `Conquered!` };
+      // Atualizar DB: Fonte perde força, Alvo muda dono e ganha força restante
+      await this.execSql(`UPDATE territories SET strength = 1 WHERE id = '${sourceId}'`);
+      await this.execSql(`UPDATE territories SET strength = ${remaining}, owner_id = '${attackerId}' WHERE id = '${targetId}'`);
+      
+      await this.generateNeighbors(target.lat, target.lng);
+      return { success: true, message: `Conquistado!` };
     } else {
-      source.strength = 1; 
-      target.strength = Math.max(1, defensePower - Math.floor(attackPower * 0.8));
-      this.updateTerritory(source);
-      this.updateTerritory(target);
-      return { success: false, message: `Attack failed!` };
+      const newDefense = Math.max(1, defensePower - Math.floor(attackPower * 0.8));
+      // Atualizar DB: Fonte perde força, Alvo perde força mas mantém dono
+      await this.execSql(`UPDATE territories SET strength = 1 WHERE id = '${sourceId}'`);
+      await this.execSql(`UPDATE territories SET strength = ${newDefense} WHERE id = '${targetId}'`);
+      return { success: false, message: `Ataque falhou!` };
     }
   }
 
   public async purchaseUpgrade(playerId: string, itemId: string, targetTerritoryId?: string): Promise<{success: boolean, message: string}> {
     const player = this.state.players[playerId];
-    if (!player) return { success: false, message: "Player not found" };
+    if (!player) return { success: false, message: "Jogador não encontrado" };
 
     let cost = 0;
     if (itemId === 'recruit') cost = 50;
@@ -313,58 +281,56 @@ export class GameService {
     if (itemId === 'sabotage') cost = 200;
 
     if (player.money < cost) {
-      return { success: false, message: "Insufficient Funds" };
+      return { success: false, message: "Fundos Insuficientes" };
     }
 
     if (itemId === 'recruit' && targetTerritoryId) {
       const t = this.state.territories[targetTerritoryId];
       if (t && t.ownerId === playerId) {
-        t.strength += 10;
-        player.money -= cost;
-        this.updateTerritory(t);
-        this.updatePlayer(player);
-        return { success: true, message: "Troops Recruited!" };
+        // Transação DB
+        await this.execSql(`UPDATE territories SET strength = strength + 10 WHERE id = '${targetTerritoryId}'`);
+        await this.execSql(`UPDATE players SET money = money - ${cost} WHERE id = '${playerId}'`);
+        return { success: true, message: "Tropas Recrutadas!" };
       }
     }
 
-    // Default deduction if generic item
-    player.money -= cost;
-    this.updatePlayer(player);
-    return { success: true, message: "Purchase successful" };
+    // Generic purchase
+    await this.execSql(`UPDATE players SET money = money - ${cost} WHERE id = '${playerId}'`);
+    return { success: true, message: "Compra realizada" };
   }
 
   public getLatestState(): GameState {
     return { ...this.state };
   }
 
-  private lastTick = Date.now();
-  private simulateGameLoop() {
-    const now = Date.now();
-    if (now - this.lastTick > 2000) { 
-      // Only run simulation logic locally if we can't trust the server to do it
-      // In this client-authoritative setup, each client processes their own growth
-      Object.values(this.state.territories).forEach(t => {
-        if (t.ownerId && t.strength < 5000) {
-          t.strength += 1;
-        }
-      });
-      
-      Object.keys(this.state.players).forEach(pid => {
-         const owned = Object.values(this.state.territories).filter(t => t.ownerId === pid).length;
-         if (owned > 0) {
-            this.state.players[pid].money += (owned * INCOME_PER_TERRITORY);
-         }
-      });
-
-      this.lastTick = now;
-      this.saveLocalState();
-    }
+  private getRandomColor() {
+      const colors = ['#0aff00', '#00f3ff', '#ff003c', '#eab308', '#ec4899', '#8b5cf6', '#ffffff', '#f97316'];
+      return colors[Math.floor(Math.random() * colors.length)];
   }
 
   public resetGame() {
-    localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem('geoconquest_user');
     window.location.reload();
+  }
+
+  // Simulação de renda passiva "Client-Side Authoritative" (apenas para o próprio player para evitar conflitos)
+  // Em produção real, isso seria um Job no servidor.
+  private async passiveIncomeLoop() {
+    const currentUserJson = localStorage.getItem('geoconquest_user');
+    if (!currentUserJson) return;
+    
+    const user = JSON.parse(currentUserJson);
+    const userId = user.id;
+
+    // Contar territórios deste usuário no estado atual
+    const ownedCount = Object.values(this.state.territories).filter(t => t.ownerId === userId).length;
+    
+    if (ownedCount > 0) {
+      const income = ownedCount * INCOME_PER_TERRITORY;
+      // Enviar incremento para o DB
+      // Usamos UPDATE money = money + X para evitar race conditions simples de leitura
+      await this.execSql(`UPDATE players SET money = money + ${income} WHERE id = '${userId}'`);
+    }
   }
 }
 

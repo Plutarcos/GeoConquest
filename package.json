@@ -11,8 +11,7 @@
     "react-tooltip": "^5.26.3",
     "lucide-react": "^0.344.0",
     "clsx": "^2.1.0",
-    "tailwind-merge": "^2.2.1",
-    "@sqlitecloud/drivers": "^1.0.0"
+    "tailwind-merge": "^2.2.1"
   },
   "devDependencies": {
     "@types/react": "^18.3.1",

@@ -1,3 +1,4 @@
+
 import React, { memo, useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Rectangle, Tooltip, useMap, Marker } from 'react-leaflet';
 import L, { LatLngExpression } from 'leaflet';
@@ -15,7 +16,7 @@ interface MapProps {
   visualEffects: VisualEffect[];
   onTerritoryClick: (tId: string) => void;
   onZoomChange: (zoom: number) => void;
-  recenterTrigger: number; // Increment to trigger recenter
+  recenterTrigger: number;
 }
 
 // Controller to handle external props affecting the map instance
@@ -35,14 +36,12 @@ const MapController = ({
   const map = useMap();
   const prevTrigger = useRef(recenterTrigger);
 
-  // Handle Zoom prop changes
   useEffect(() => {
     if (Math.abs(map.getZoom() - zoomLevel) > 0.1) {
       map.setZoom(zoomLevel);
     }
   }, [zoomLevel, map]);
 
-  // Handle Center/Trigger changes
   useEffect(() => {
     if (recenterTrigger !== prevTrigger.current) {
       map.flyTo([centerLat, centerLng], map.getZoom(), { duration: 1.5 });
@@ -50,7 +49,6 @@ const MapController = ({
     }
   }, [recenterTrigger, centerLat, centerLng, map]);
 
-  // Listen to map zoom events to update parent state
   useEffect(() => {
     const onZoom = () => {
       onZoomChange(map.getZoom());
@@ -113,14 +111,21 @@ const MapComponent: React.FC<MapProps> = ({
            let fillOpacity = 0.3;
            let strokeColor = COLORS.STROKE;
            let weight = 1;
+           let ownerName = "Neutro";
 
            if (t.ownerId) {
              fillOpacity = 0.5;
-             if (t.ownerId === currentPlayerId) {
-               fillColor = COLORS.PLAYER;
+             const owner = players[t.ownerId];
+             if (owner) {
+                ownerName = owner.username;
+                if (t.ownerId === currentPlayerId) {
+                    fillColor = COLORS.PLAYER;
+                } else {
+                    fillColor = owner.color;
+                }
              } else {
-               const owner = players[t.ownerId];
-               fillColor = owner ? owner.color : COLORS.ENEMY;
+                 ownerName = "Desconhecido";
+                 fillColor = COLORS.ENEMY;
              }
            }
 
@@ -152,7 +157,12 @@ const MapComponent: React.FC<MapProps> = ({
                   className={`bg-transparent border-none text-white font-bold shadow-none text-center ${isSelected ? 'text-lg' : 'text-xs'}`}
                >
                  <div className="drop-shadow-md" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.8)' }}>
-                   {t.strength}
+                   <div>{t.strength}</div>
+                   {t.ownerId && (
+                     <div className="text-[8px] uppercase tracking-wider mt-1 bg-black/50 px-1 rounded truncate max-w-[60px] mx-auto">
+                        {ownerName}
+                     </div>
+                   )}
                  </div>
                </Tooltip>
              </Rectangle>
