@@ -5,7 +5,7 @@ import { gameService } from './services/dbService';
 import MapComponent from './components/Map';
 import HUD from './components/HUD';
 import { Shop } from './components/Shop';
-import { Tooltip } from 'react-tooltip';
+// Removed react-tooltip as Leaflet handles its own tooltips
 import { Loader2, Crosshair, MapPin, Play, XCircle } from 'lucide-react';
 import { TRANSLATIONS } from './constants';
 
@@ -19,10 +19,11 @@ const App: React.FC = () => {
     players: {},
     currentPlayerId: null,
     selectedTerritoryId: null,
-    lastUpdate: 0
+    lastUpdate: 0,
+    centerLat: 0,
+    centerLng: 0
   });
   const [message, setMessage] = useState<string | null>(null);
-  const [tooltipContent, setTooltipContent] = useState("");
   const [isLocating, setIsLocating] = useState(false);
   const [showShop, setShowShop] = useState(false);
 
@@ -64,18 +65,27 @@ const App: React.FC = () => {
       setIsLocating(true);
       getUserLocation()
         .then(loc => {
-           if (loc.countryCode) {
-             const idStr = String(loc.countryCode); // ensure string
-             console.log("Auto-located:", idStr);
-             gameService.ensureTerritory(idStr);
-             setGameState(prev => ({ ...prev, selectedTerritoryId: idStr }));
-             showToast(`${t.located}: ${idStr}`, 'success');
-           } else {
-             showToast("Could not determine location. Please select on map.", 'info');
-           }
+           console.log("Found location:", loc);
+           // Initialize grid around this location
+           gameService.initLocalGrid(loc.lat, loc.lng);
+           
+           // Determine the territory ID for this exact location
+           const myTerritoryId = gameService.getGridId(loc.lat, loc.lng);
+           
+           setGameState(prev => ({ 
+             ...prev, 
+             ...gameService.getLatestState(),
+             selectedTerritoryId: myTerritoryId 
+           }));
+           
+           showToast(t.located, 'success');
         })
-        .catch(() => {
-           showToast("Location failed. Please select manually.", 'error');
+        .catch((e) => {
+           console.error(e);
+           showToast("GPS Error. Using fallback.", 'error');
+           // Fallback is handled inside gameService defaults usually, but we ensure grid init
+           gameService.initLocalGrid(-23.5505, -46.6333); // Default SP
+           setGameState(prev => ({ ...prev, ...gameService.getLatestState() }));
         })
         .finally(() => setIsLocating(false));
     }
@@ -108,14 +118,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleTerritoryClick = async (geo: any) => {
-    const clickedId = String(geo.id);
-    
-    // Ensure territory exists in DB
-    if (!gameState.territories[clickedId]) {
-      gameService.initMapData([{ id: clickedId, properties: geo.properties }]);
-    }
-
+  const handleTerritoryClick = async (clickedId: string) => {
     if (status === GameStatus.SETUP) {
       setGameState(prev => ({ ...prev, selectedTerritoryId: clickedId }));
       return;
@@ -129,7 +132,7 @@ const App: React.FC = () => {
     // Gameplay Logic
     if (clickedTerritory.ownerId === player.id) {
       setGameState(prev => ({ ...prev, selectedTerritoryId: clickedId }));
-      showToast(`Selected ${clickedTerritory.name}`);
+      // showToast(`Selected Sector`);
     } else {
       if (gameState.selectedTerritoryId) {
         // Attempt Attack
@@ -151,7 +154,6 @@ const App: React.FC = () => {
   const handlePurchase = async (item: ShopItem) => {
     if (!player) return;
     
-    // Some items require a target territory
     let targetId: string | undefined = undefined;
     if (item.id === 'recruit') {
        if (!gameState.selectedTerritoryId) {
@@ -165,7 +167,6 @@ const App: React.FC = () => {
     showToast(result.message, result.success ? 'success' : 'error');
     if (result.success) {
       setPlayer(prev => prev ? ({ ...prev, money: prev.money - item.cost }) : null);
-      // Update territory state instantly
       setGameState(prev => ({ ...prev, ...gameService.getLatestState() }));
     }
   };
@@ -175,31 +176,28 @@ const App: React.FC = () => {
     setTimeout(() => setMessage(null), 3000);
   };
 
-  const getSelectedTerritoryName = () => {
-    if (!gameState.selectedTerritoryId) return null;
-    const t = gameState.territories[gameState.selectedTerritoryId];
-    return t ? t.name : gameState.selectedTerritoryId;
-  };
-
   return (
     <div className="w-screen h-screen overflow-hidden bg-dark-bg text-white font-sans relative">
       
-      {/* Background Map */}
+      {/* Background Map - Now Leaflet */}
       <div className={`transition-all duration-1000 w-full h-full ${status === GameStatus.PLAYING || status === GameStatus.SETUP ? 'opacity-100' : 'opacity-30 blur-sm'}`}>
-         <MapComponent 
-            territories={gameState.territories}
-            players={gameState.players}
-            currentPlayerId={player?.id || null}
-            selectedTerritoryId={gameState.selectedTerritoryId}
-            onTerritoryClick={handleTerritoryClick}
-            setTooltipContent={setTooltipContent}
-         />
-         <Tooltip id="my-tooltip" content={tooltipContent} />
+         {/* Only render map if we have a center, otherwise wait for init */}
+         {(gameState.centerLat !== 0) && (
+             <MapComponent 
+                centerLat={gameState.centerLat}
+                centerLng={gameState.centerLng}
+                territories={gameState.territories}
+                players={gameState.players}
+                currentPlayerId={player?.id || null}
+                selectedTerritoryId={gameState.selectedTerritoryId}
+                onTerritoryClick={handleTerritoryClick}
+             />
+         )}
       </div>
 
       {/* Login Screen */}
       {status === GameStatus.LOGIN && (
-        <div className="absolute inset-0 flex items-center justify-center z-50">
+        <div className="absolute inset-0 flex items-center justify-center z-[1000] pointer-events-auto">
           <div className="bg-panel-bg p-8 rounded-2xl border border-neon-blue shadow-[0_0_50px_rgba(0,243,255,0.2)] backdrop-blur-xl max-w-md w-full mx-4 animate-in fade-in zoom-in duration-500">
             <h1 className="text-4xl font-bold text-center mb-2 bg-gradient-to-r from-neon-blue to-neon-green bg-clip-text text-transparent">
               {t.gameTitle}
@@ -240,7 +238,7 @@ const App: React.FC = () => {
 
       {/* Setup / Location Screen */}
       {status === GameStatus.SETUP && (
-         <div className="absolute bottom-10 left-0 right-0 flex justify-center z-50 px-4">
+         <div className="absolute bottom-10 left-0 right-0 flex justify-center z-[1000] px-4">
            <div className="bg-panel-bg border border-neon-green/50 backdrop-blur-xl p-6 rounded-2xl shadow-2xl w-full max-w-lg flex flex-col gap-4 animate-in slide-in-from-bottom duration-500">
               <div className="flex items-start justify-between">
                 <div>
@@ -251,13 +249,6 @@ const App: React.FC = () => {
                      {isLocating ? t.scanning : t.selectBaseDesc}
                    </p>
                 </div>
-                {isLocating ? (
-                   <button onClick={() => setIsLocating(false)} className="bg-red-900/50 hover:bg-red-900 p-2 rounded text-red-200">
-                      <XCircle size={20} />
-                   </button>
-                ) : (
-                  <MapPin className="text-gray-600" />
-                )}
               </div>
 
               {isLocating && (
@@ -265,13 +256,6 @@ const App: React.FC = () => {
                    <Loader2 className="animate-spin" size={16} /> {t.scanning}
                 </div>
               )}
-
-              <div className="bg-black/40 p-3 rounded-lg border border-gray-700">
-                <span className="text-xs text-gray-500 uppercase block mb-1">Target</span>
-                <span className="text-xl font-mono text-white font-bold">
-                   {getSelectedTerritoryName() || "..."}
-                </span>
-              </div>
 
               <button 
                  onClick={handleStartGame}
@@ -313,7 +297,7 @@ const App: React.FC = () => {
 
       {/* Toast Notification */}
       {message && (
-        <div className="absolute top-24 left-1/2 -translate-x-1/2 pointer-events-none z-50 w-max max-w-[90vw]">
+        <div className="absolute top-24 left-1/2 -translate-x-1/2 pointer-events-none z-[1100] w-max max-w-[90vw]">
            <div className="bg-black/90 border border-gray-600 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 animate-bounce">
               <Crosshair size={20} className="text-neon-red" />
               <span className="font-mono text-sm">{message}</span>

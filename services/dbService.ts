@@ -1,7 +1,7 @@
 import { GameState, Player, Territory } from '../types';
-import { INITIAL_STRENGTH, INITIAL_MONEY, INCOME_PER_TERRITORY } from '../constants';
+import { INITIAL_STRENGTH, INITIAL_MONEY, INCOME_PER_TERRITORY, GRID_SIZE } from '../constants';
 
-const STORAGE_KEY = 'geoconquest_state_v3';
+const STORAGE_KEY = 'geoconquest_state_v4_grid';
 
 export class GameService {
   private state: GameState;
@@ -21,6 +21,8 @@ export class GameService {
       currentPlayerId: null,
       selectedTerritoryId: null,
       lastUpdate: Date.now(),
+      centerLat: 0,
+      centerLng: 0
     };
   }
 
@@ -28,38 +30,58 @@ export class GameService {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
   }
 
-  // Initialize the game map data
-  public initMapData(geoJSONFeatures: any[]) {
-    let changed = false;
-    geoJSONFeatures.forEach(feature => {
-      // TopoJSON from unpkg often uses ISO 3 numeric codes or string codes as 'id'
-      const id = feature.id; 
-      // Ensure we treat numeric IDs as strings
-      const idStr = String(id);
-      
-      if (!this.state.territories[idStr]) {
-        this.state.territories[idStr] = {
-          id: idStr,
-          name: feature.properties.name || "Unknown Region",
-          ownerId: null,
-          strength: Math.floor(Math.random() * 20) + 5, // Random neutral strength
-        };
-        changed = true;
+  // Generate a grid around the player's start location
+  public initLocalGrid(centerLat: number, centerLng: number) {
+    this.state.centerLat = centerLat;
+    this.state.centerLng = centerLng;
+
+    const radius = 3; // 3x3 grid around center to start = 7x7 total area
+    for (let x = -radius; x <= radius; x++) {
+      for (let y = -radius; y <= radius; y++) {
+        // Snap lat/lng to grid
+        const lat = centerLat + (x * GRID_SIZE);
+        const lng = centerLng + (y * GRID_SIZE);
+        const id = this.getGridId(lat, lng);
+
+        if (!this.state.territories[id]) {
+          this.state.territories[id] = {
+            id,
+            name: `Sector ${x},${y}`,
+            ownerId: null,
+            strength: Math.floor(Math.random() * 20) + 5,
+            lat: this.snapToGrid(lat),
+            lng: this.snapToGrid(lng)
+          };
+        }
       }
-    });
-    if (changed) this.saveState();
+    }
+    this.saveState();
   }
 
-  public ensureTerritory(id: string, name: string = "Unknown Region") {
+  private snapToGrid(val: number): number {
+    return Math.round(val / GRID_SIZE) * GRID_SIZE;
+  }
+
+  public getGridId(lat: number, lng: number): string {
+    const snappedLat = this.snapToGrid(lat).toFixed(4);
+    const snappedLng = this.snapToGrid(lng).toFixed(4);
+    return `${snappedLat}_${snappedLng}`;
+  }
+
+  public ensureTerritory(lat: number, lng: number): Territory {
+    const id = this.getGridId(lat, lng);
     if (!this.state.territories[id]) {
-      this.state.territories[id] = {
-        id,
-        name,
-        ownerId: null,
-        strength: 10
-      };
-      this.saveState();
+       this.state.territories[id] = {
+         id,
+         name: `Unknown Sector`,
+         ownerId: null,
+         strength: 10,
+         lat: this.snapToGrid(lat),
+         lng: this.snapToGrid(lng)
+       };
+       this.saveState();
     }
+    return this.state.territories[id];
   }
 
   public async login(username: string): Promise<Player> {
@@ -87,11 +109,9 @@ export class GameService {
 
   private spawnBots() {
     const bots = [
-      { id: 'bot_china', username: 'DragonDynasty', color: '#ff003c', money: 1000 },
-      { id: 'bot_eu', username: 'EuroUnion', color: '#00f3ff', money: 1000 },
-      { id: 'bot_usa', username: 'EagleForce', color: '#eab308', money: 1000 },
+      { id: 'bot_alpha', username: 'OmegaCorp', color: '#ff003c', money: 1000 },
+      { id: 'bot_beta', username: 'CyberSys', color: '#00f3ff', money: 1000 },
     ];
-
     bots.forEach(bot => {
       if (!this.state.players[bot.id]) {
         this.state.players[bot.id] = bot;
@@ -101,15 +121,43 @@ export class GameService {
   }
 
   public async captureTerritory(playerId: string, territoryId: string) {
-    if (!this.state.territories[territoryId]) {
-      this.ensureTerritory(territoryId);
-    }
     const t = this.state.territories[territoryId];
     if (t) {
       t.ownerId = playerId;
       t.strength = INITIAL_STRENGTH;
       this.saveState();
+      
+      // Expand visibility? We could generate neighbors here
+      this.generateNeighbors(t.lat, t.lng);
     }
+  }
+
+  private generateNeighbors(lat: number, lng: number) {
+     const offsets = [[0,1], [0,-1], [1,0], [-1,0]];
+     offsets.forEach(([ox, oy]) => {
+        const nLat = lat + (ox * GRID_SIZE);
+        const nLng = lng + (oy * GRID_SIZE);
+        const id = this.getGridId(nLat, nLng);
+        if (!this.state.territories[id]) {
+           this.state.territories[id] = {
+             id,
+             name: `Sector`,
+             ownerId: null,
+             strength: Math.floor(Math.random() * 15) + 5,
+             lat: this.snapToGrid(nLat),
+             lng: this.snapToGrid(nLng)
+           };
+        }
+     });
+     this.saveState();
+  }
+
+  public isAdjacent(t1: Territory, t2: Territory): boolean {
+    // Check if centers are within roughly 1.5 * GRID_SIZE distance
+    const dLat = Math.abs(t1.lat - t2.lat);
+    const dLng = Math.abs(t1.lng - t2.lng);
+    const tolerance = GRID_SIZE * 1.5;
+    return (dLat < tolerance && dLng < 0.0001) || (dLng < tolerance && dLat < 0.0001);
   }
 
   public async attackTerritory(attackerId: string, sourceId: string, targetId: string): Promise<{success: boolean, message: string}> {
@@ -119,23 +167,30 @@ export class GameService {
     if (!source || !target) return { success: false, message: "Invalid territory" };
     if (source.ownerId !== attackerId) return { success: false, message: "You don't own the source!" };
     if (target.ownerId === attackerId) return { success: false, message: "You already own this!" };
+    
+    if (!this.isAdjacent(source, target)) {
+      return { success: false, message: "Target is not adjacent!" };
+    }
+
     if (source.strength <= 1) return { success: false, message: "Not enough troops!" };
 
     const attackPower = source.strength - 1; 
     const defensePower = target.strength;
 
+    // Combat logic
     if (attackPower > defensePower) {
       const remaining = attackPower - defensePower;
       this.state.territories[sourceId].strength = 1;
       this.state.territories[targetId].strength = remaining;
       this.state.territories[targetId].ownerId = attackerId;
       this.saveState();
-      return { success: true, message: `Conquered ${target.name}!` };
+      this.generateNeighbors(target.lat, target.lng); // Discover new lands
+      return { success: true, message: `Conquered!` };
     } else {
       this.state.territories[sourceId].strength = 1; 
       this.state.territories[targetId].strength = Math.max(1, defensePower - Math.floor(attackPower * 0.8));
       this.saveState();
-      return { success: false, message: `Attack failed! ${target.name} held strong.` };
+      return { success: false, message: `Attack failed!` };
     }
   }
 
@@ -174,16 +229,16 @@ export class GameService {
   private simulateGameLoop() {
     const now = Date.now();
     if (now - this.lastTick > 2000) { 
-      // 1. Growth: Strength increases slowly
+      // 1. Growth
       Object.values(this.state.territories).forEach(t => {
         if (t.ownerId && t.strength < 5000) {
           t.strength += 1;
         }
       });
       
-      // 2. Economy: Money increases based on territories
+      // 2. Economy
       Object.keys(this.state.players).forEach(pid => {
-         if (pid.startsWith('bot_')) return; // Bots have infinite money in this sim
+         if (pid.startsWith('bot_')) return;
          const owned = Object.values(this.state.territories).filter(t => t.ownerId === pid).length;
          if (owned > 0) {
             this.state.players[pid].money += (owned * INCOME_PER_TERRITORY);
@@ -202,15 +257,17 @@ export class GameService {
 
   private runBotAI() {
     const all = Object.values(this.state.territories);
+    // Find a bot territory that is strong
     const botTerritories = all.filter(t => t.ownerId && t.ownerId.startsWith('bot_') && t.strength > 20);
     
     if (botTerritories.length > 0) {
       const attacker = botTerritories[Math.floor(Math.random() * botTerritories.length)];
-      const potentialTarget = all[Math.floor(Math.random() * all.length)];
+      // Find adjacent target
+      const target = all.find(t => t.id !== attacker.id && t.ownerId !== attacker.ownerId && this.isAdjacent(attacker, t));
       
-      if (potentialTarget.id !== attacker.id && potentialTarget.ownerId !== attacker.ownerId) {
-         if (attacker.strength > potentialTarget.strength + 5) {
-            this.attackTerritory(attacker.ownerId!, attacker.id, potentialTarget.id);
+      if (target) {
+         if (attacker.strength > target.strength + 5) {
+            this.attackTerritory(attacker.ownerId!, attacker.id, target.id);
          }
       }
     }

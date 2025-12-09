@@ -6,11 +6,12 @@ export interface Player {
 }
 
 export interface Territory {
-  id: string; // ISO 3 code or numeric ID from topojson
-  name: string;
+  id: string; // Coordinate string "lat_lng"
+  name: string; // Generated name like "Sector A-1"
   ownerId: string | null;
   strength: number;
-  path?: string; 
+  lat: number;
+  lng: number;
 }
 
 export interface GameState {
@@ -19,12 +20,14 @@ export interface GameState {
   currentPlayerId: string | null;
   selectedTerritoryId: string | null;
   lastUpdate: number;
+  centerLat: number;
+  centerLng: number;
 }
 
 export interface GeoLocation {
   lat: number;
   lng: number;
-  countryCode?: string; // ISO 3
+  countryCode?: string | null;
 }
 
 export enum GameStatus {

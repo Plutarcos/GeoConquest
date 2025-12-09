@@ -3,57 +3,31 @@ import { GeoLocation } from '../types';
 export const getUserLocation = async (): Promise<GeoLocation> => {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
-      fallbackToIP(resolve, reject);
+      // Default to a known location (e.g., Downtown Sao Paulo) if geo unavailable
+      resolve({ lat: -23.5505, lng: -46.6333, countryCode: 'BRA' });
       return;
     }
 
     navigator.geolocation.getCurrentPosition(
-      async (position) => {
+      (position) => {
         const { latitude, longitude } = position.coords;
-        
-        try {
-          // Use BigDataCloud free endpoint correctly
-          const response = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`);
-          
-          if (!response.ok) throw new Error("Geocode failed");
-          
-          const data = await response.json();
-          // Prefer ISO 3 ('isoAlpha3') if available, else 'countryCode' (ISO 2)
-          const countryCode = data.isoAlpha3 || data.countryCode;
-
-          resolve({
-            lat: latitude,
-            lng: longitude,
-            countryCode: countryCode
-          });
-          
-        } catch (e) {
-          console.warn("Geocoding failed, falling back to IP", e);
-          fallbackToIP(resolve, reject, { lat: latitude, lng: longitude });
-        }
+        // We don't need strict reverse geocoding for the grid system, just coords
+        resolve({
+          lat: latitude,
+          lng: longitude,
+          countryCode: 'LOC' 
+        });
       },
       (error) => {
-        console.error("Geo error, trying IP fallback", error);
-        fallbackToIP(resolve, reject);
+        console.warn("Geo error, using fallback", error);
+        // Fallback to coordinates (Sao Paulo)
+        resolve({ lat: -23.5505, lng: -46.6333, countryCode: 'BRA' });
       },
-      { timeout: 10000 }
+      { 
+        enableHighAccuracy: true, // Crucial for street level
+        timeout: 15000, 
+        maximumAge: 0 
+      }
     );
   });
-};
-
-const fallbackToIP = (resolve: Function, reject: Function, overrideCoords?: {lat: number, lng: number}) => {
-  fetch('https://ipapi.co/json/')
-    .then(res => res.json())
-    .then(data => {
-      resolve({
-        lat: overrideCoords ? overrideCoords.lat : data.latitude,
-        lng: overrideCoords ? overrideCoords.lng : data.longitude,
-        countryCode: data.country_code_iso3 || data.country_code // ipapi uses country_code_iso3
-      });
-    })
-    .catch((err) => {
-       console.error("IP fallback failed", err);
-       // If all fails, resolve with null so user can pick manually
-       resolve({ lat: 0, lng: 0, countryCode: null });
-    });
 };

@@ -1,106 +1,100 @@
 import React, { memo } from 'react';
-import {
-  ComposableMap,
-  Geographies,
-  Geography,
-  ZoomableGroup,
-  Graticule,
-  Sphere
-} from "react-simple-maps";
-import { WORLD_TOPO_JSON_URL, COLORS } from '../constants';
+import { MapContainer, TileLayer, Rectangle, Tooltip, useMap } from 'react-leaflet';
+import { LatLngExpression } from 'leaflet';
+import { MAP_TILE_URL, MAP_ATTRIBUTION, COLORS, GRID_SIZE } from '../constants';
 import { Territory, Player } from '../types';
 
 interface MapProps {
+  centerLat: number;
+  centerLng: number;
   territories: Record<string, Territory>;
   players: Record<string, Player>;
   currentPlayerId: string | null;
   selectedTerritoryId: string | null;
-  onTerritoryClick: (geo: any) => void;
-  setTooltipContent: (content: string) => void;
+  onTerritoryClick: (tId: string) => void;
 }
 
+// Helper to update view when center changes
+const MapRecenter = ({ lat, lng }: { lat: number, lng: number }) => {
+  const map = useMap();
+  React.useEffect(() => {
+    map.flyTo([lat, lng], 16); // Zoom level 16 is good for street blocks
+  }, [lat, lng, map]);
+  return null;
+};
+
 const MapComponent: React.FC<MapProps> = ({ 
+  centerLat,
+  centerLng,
   territories, 
   players, 
   currentPlayerId, 
   selectedTerritoryId,
-  onTerritoryClick,
-  setTooltipContent
+  onTerritoryClick
 }) => {
   
-  const getFillColor = (geoId: string) => {
-    // TopoJSON IDs might be numbers, convert to string for lookup
-    const idStr = String(geoId);
-    const territory = territories[idStr];
-    
-    if (selectedTerritoryId === idStr) return COLORS.SELECTED;
-    
-    if (!territory || !territory.ownerId) return COLORS.NEUTRAL;
-    
-    if (territory.ownerId === currentPlayerId) return COLORS.PLAYER;
-    
-    const owner = players[territory.ownerId];
-    return owner ? owner.color : COLORS.ENEMY;
-  };
-
   return (
-    <div className="w-full h-full bg-dark-bg cursor-move" data-tooltip-id="my-tooltip">
-      <ComposableMap 
-        projectionConfig={{ scale: 180 }} 
-        width={1000} 
-        height={600}
-        style={{ width: "100%", height: "100%", backgroundColor: COLORS.WATER }}
+    <div className="w-full h-full bg-dark-bg">
+      <MapContainer 
+        center={[centerLat, centerLng]} 
+        zoom={16} 
+        scrollWheelZoom={true} 
+        style={{ height: "100%", width: "100%" }}
+        className="z-0"
       >
-        <ZoomableGroup minZoom={1} maxZoom={12} translateExtent={[[0, 0], [1000, 600]]}>
-          <Sphere stroke={COLORS.STROKE} strokeWidth={2} id="sphere" fill="transparent"/>
-          <Graticule stroke={COLORS.STROKE} strokeWidth={0.5} />
-          
-          <Geographies geography={WORLD_TOPO_JSON_URL}>
-            {({ geographies }) =>
-              geographies.map((geo) => {
-                const idStr = String(geo.id);
-                const t = territories[idStr];
-                const strength = t ? t.strength : 0;
-                const ownerName = t?.ownerId ? (players[t.ownerId]?.username || 'Unknown') : 'Neutral';
+        <TileLayer
+          attribution={MAP_ATTRIBUTION}
+          url={MAP_TILE_URL}
+        />
+        
+        <MapRecenter lat={centerLat} lng={centerLng} />
 
-                return (
-                  <Geography
-                    key={geo.rsmKey}
-                    geography={geo}
-                    onClick={() => onTerritoryClick(geo)}
-                    onMouseEnter={() => {
-                       setTooltipContent(`${geo.properties.name} | ${ownerName} | Str: ${strength}`);
-                    }}
-                    onMouseLeave={() => {
-                      setTooltipContent("");
-                    }}
-                    style={{
-                      default: {
-                        fill: getFillColor(geo.id),
-                        stroke: COLORS.STROKE,
-                        strokeWidth: 0.5,
-                        outline: "none",
-                        transition: "all 300ms ease"
-                      },
-                      hover: {
-                        fill: selectedTerritoryId === String(geo.id) ? COLORS.SELECTED : COLORS.HOVER,
-                        stroke: "#fff",
-                        strokeWidth: 1.5,
-                        outline: "none",
-                        cursor: "pointer"
-                      },
-                      pressed: {
-                        fill: "#fff",
-                        outline: "none",
-                      },
-                    }}
-                  />
-                );
-              })
-            }
-          </Geographies>
-        </ZoomableGroup>
-      </ComposableMap>
+        {Object.values(territories).map((t) => {
+           // Calculate rectangle bounds based on center lat/lng and Grid Size
+           // We subtract/add half the grid size to center the rectangle
+           const offset = GRID_SIZE / 2;
+           const bounds: [number, number][] = [
+             [t.lat - offset, t.lng - offset],
+             [t.lat + offset, t.lng + offset]
+           ];
+
+           let fillColor = COLORS.NEUTRAL;
+           let fillOpacity = 0.4;
+           let strokeColor = COLORS.STROKE;
+
+           if (t.ownerId) {
+             fillOpacity = 0.6;
+             if (t.ownerId === currentPlayerId) {
+               fillColor = COLORS.PLAYER;
+             } else {
+               const owner = players[t.ownerId];
+               fillColor = owner ? owner.color : COLORS.ENEMY;
+             }
+           }
+
+           if (selectedTerritoryId === t.id) {
+              strokeColor = COLORS.SELECTED;
+              fillOpacity = 0.8;
+           }
+
+           return (
+             <Rectangle
+               key={t.id}
+               bounds={bounds as any}
+               pathOptions={{ color: strokeColor, weight: selectedTerritoryId === t.id ? 3 : 1, fillColor, fillOpacity }}
+               eventHandlers={{
+                 click: () => onTerritoryClick(t.id),
+               }}
+             >
+               <Tooltip direction="center" permanent className="bg-transparent border-none text-white font-bold shadow-none text-center">
+                 <div className="text-xs drop-shadow-md">
+                   {t.strength}
+                 </div>
+               </Tooltip>
+             </Rectangle>
+           );
+        })}
+      </MapContainer>
     </div>
   );
 };
