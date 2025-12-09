@@ -1,0 +1,7 @@
+{
+  "name": "GeoConquest: World Domination",
+  "description": "A real-time multiplayer strategy game where you conquer the world starting from your real-world location.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
