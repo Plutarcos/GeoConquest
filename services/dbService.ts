@@ -78,7 +78,7 @@ export class GameService {
 
   // --- Game Logic ---
 
-  public async login(username: string): Promise<Player> {
+  public async login(username: string, password?: string): Promise<Player> {
     const id = `user_${username.replace(/\s+/g, '_').toLowerCase()}`;
     const color = this.getRandomColor();
     const now = Date.now();
@@ -97,7 +97,8 @@ export class GameService {
             id, 
             username, 
             color, 
-            last_seen: now 
+            last_seen: now,
+            ...(password ? { password } : {})
         }, { onConflict: 'id', ignoreDuplicates: false })
         .select()
         .single();

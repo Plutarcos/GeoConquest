@@ -1,3 +1,4 @@
+
 // Leaflet Tile Layer (Dark Matter)
 export const MAP_TILE_URL = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
 export const MAP_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
@@ -30,6 +31,90 @@ export const ENERGY_COST_ATTACK = 20;
 // Supabase Configuration
 export const SUPABASE_URL = "https://jushyrehjgudedaavzcg.supabase.co";
 export const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp1c2h5cmVoamd1ZGVkYWF2emNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUzMjYyODIsImV4cCI6MjA4MDkwMjI4Mn0.UIbSeC_hzydRHI5I-3rANjUj_MU1k9CDyE3opcEdxM8";
+
+// SQL Commands Reference (Run these in Supabase SQL Editor)
+export const SQL_INIT_COMMANDS = `
+-- 1. Enable PostGIS (Optional but recommended for future, not strictly used here yet)
+-- CREATE EXTENSION IF NOT EXISTS postgis;
+
+-- 2. Players Table
+CREATE TABLE IF NOT EXISTS players (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    color TEXT NOT NULL,
+    money NUMERIC DEFAULT 100,
+    energy NUMERIC DEFAULT 100,
+    last_seen BIGINT,
+    password TEXT -- New column for auth
+);
+
+-- 3. Territories Table
+CREATE TABLE IF NOT EXISTS territories (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    owner_id TEXT REFERENCES players(id),
+    strength INTEGER DEFAULT 10,
+    lat FLOAT NOT NULL,
+    lng FLOAT NOT NULL
+);
+
+-- 4. Enable Realtime
+alter publication supabase_realtime add table territories;
+alter publication supabase_realtime add table players;
+
+-- 5. Atomic Attack Function with Permadeath
+CREATE OR REPLACE FUNCTION attack_territory(
+  attacker_id TEXT,
+  source_id TEXT,
+  target_id TEXT,
+  energy_cost NUMERIC
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  att_strength INTEGER;
+  def_strength INTEGER;
+  attacker_energy NUMERIC;
+  def_owner TEXT;
+  def_territory_count INTEGER;
+BEGIN
+  -- Verify Resources
+  SELECT strength, owner_id INTO att_strength, def_owner FROM territories WHERE id = source_id;
+  SELECT strength, owner_id INTO def_strength, def_owner FROM territories WHERE id = target_id;
+  SELECT energy INTO attacker_energy FROM players WHERE id = attacker_id;
+
+  IF attacker_energy < energy_cost OR att_strength <= 1 THEN
+     RETURN jsonb_build_object('success', false, 'message', 'Recursos insuficientes');
+  END IF;
+
+  -- Consume Energy & Army
+  UPDATE players SET energy = energy - energy_cost WHERE id = attacker_id;
+  UPDATE territories SET strength = 1 WHERE id = source_id; 
+
+  -- Battle Logic (RNG + Defense Bonus)
+  -- Defender gets 10% bonus
+  IF (att_strength * (0.8 + random()*0.4)) > (def_strength * 1.1) THEN
+     -- Victory
+     UPDATE territories SET strength = (att_strength - def_strength), owner_id = attacker_id WHERE id = target_id;
+     
+     -- Permadeath Check: If defender has no territories left, delete them
+     IF def_owner IS NOT NULL AND def_owner != attacker_id THEN
+        SELECT COUNT(*) INTO def_territory_count FROM territories WHERE owner_id = def_owner;
+        IF def_territory_count = 0 THEN
+           DELETE FROM players WHERE id = def_owner;
+        END IF;
+     END IF;
+
+     RETURN jsonb_build_object('success', true, 'message', 'Conquistado');
+  ELSE
+     -- Defeat
+     UPDATE territories SET strength = GREATEST(1, def_strength - (att_strength / 2)) WHERE id = target_id;
+     RETURN jsonb_build_object('success', false, 'message', 'Defesa resistiu');
+  END IF;
+END;
+$$;
+`;
 
 export const SHOP_ITEMS = [
   { id: 'recruit', cost: 50, nameKey: 'recruit_troops', effect: 'strength_10', icon: 'UserPlus' },
@@ -76,7 +161,12 @@ export const TRANSLATIONS = {
     sendMessage: "Enviar mensagem...",
     newMsg: "Nova Msg",
     online: "Online",
-    offline: "Offline"
+    offline: "Offline",
+    permadeathWarn: "Atenção: Se perder todos os territórios, sua conta será deletada.",
+    passwordOpt: "Senha (Opcional)",
+    guestLogin: "Entrar como Convidado",
+    error_occupied: "Setor Ocupado! Escolha outro para iniciar.",
+    error_adjacent: "Alvo muito distante! Deve ser adjacente."
   },
   'en': {
     gameTitle: "GEOCONQUEST",
@@ -114,7 +204,12 @@ export const TRANSLATIONS = {
     sendMessage: "Send message...",
     newMsg: "New Msg",
     online: "Online",
-    offline: "Offline"
+    offline: "Offline",
+    permadeathWarn: "Warning: If you lose all territories, account is deleted.",
+    passwordOpt: "Password (Optional)",
+    guestLogin: "Login as Guest",
+    error_occupied: "Sector Occupied! Choose another to start.",
+    error_adjacent: "Target too far! Must be adjacent."
   },
   'es': {
     gameTitle: "GEOCONQUISTA",
@@ -152,7 +247,12 @@ export const TRANSLATIONS = {
     sendMessage: "Enviar mensaje...",
     newMsg: "Nuevo",
     online: "En Línea",
-    offline: "Sin Conexión"
+    offline: "Sin Conexión",
+    permadeathWarn: "Aviso: Si pierdes todo, se borra la cuenta.",
+    passwordOpt: "Contraseña (Opcional)",
+    guestLogin: "Entrar como Invitado",
+    error_occupied: "Sector Ocupado! Elige otro.",
+    error_adjacent: "Objetivo lejano. Debe ser adyacente."
   },
   'de': {
     gameTitle: "GEOEROBERUNG",
@@ -190,7 +290,12 @@ export const TRANSLATIONS = {
     sendMessage: "Nachricht senden...",
     newMsg: "Neu",
     online: "Online",
-    offline: "Offline"
+    offline: "Offline",
+    permadeathWarn: "Warnung: Bei totalem Verlust wird das Konto gelöscht.",
+    passwordOpt: "Passwort (Optional)",
+    guestLogin: "Als Gast",
+    error_occupied: "Sektor besetzt! Wähle einen anderen.",
+    error_adjacent: "Zu weit! Muss benachbart sein."
   },
   'zh': {
     gameTitle: "地缘征服",
@@ -228,6 +333,11 @@ export const TRANSLATIONS = {
     sendMessage: "发送消息...",
     newMsg: "新消息",
     online: "在线",
-    offline: "离线"
+    offline: "离线",
+    permadeathWarn: "警告：如果失去所有领土，账户将被删除。",
+    passwordOpt: "密码 (可选)",
+    guestLogin: "游客登录",
+    error_occupied: "区域已被占领！请选择其他区域。",
+    error_adjacent: "目标太远！必须相邻。"
   }
 };

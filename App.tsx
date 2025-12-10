@@ -7,12 +7,13 @@ import MapControls from './components/MapControls';
 import HUD from './components/HUD';
 import { Shop } from './components/Shop';
 import Chat from './components/Chat';
-import { Loader2, Crosshair, MapPin, Play, Wifi, WifiOff } from 'lucide-react';
+import { Loader2, Crosshair, MapPin, Play, Wifi, WifiOff, AlertTriangle } from 'lucide-react';
 import { TRANSLATIONS } from './constants';
 
 const App: React.FC = () => {
   const [status, setStatus] = useState<GameStatus>(GameStatus.LOGIN);
   const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [player, setPlayer] = useState<Player | null>(null);
   const [language, setLanguage] = useState<Language>('pt-BR');
   const [isInitializing, setIsInitializing] = useState(true);
@@ -70,6 +71,15 @@ const App: React.FC = () => {
     if (status === GameStatus.PLAYING || status === GameStatus.SETUP) {
       const interval = setInterval(async () => {
         const syncedState = await gameService.syncState(player?.id || null);
+        
+        // Permadeath Check: If synced player data is missing/null but we are playing, we died
+        if (player && syncedState.players && !syncedState.players[player.id]) {
+           showToast("FATAL ERROR: SIGNAL LOST. BASE DESTROYED.", 'error');
+           localStorage.removeItem('geoconquest_user');
+           setTimeout(() => window.location.reload(), 3000);
+           return;
+        }
+
         setGameState(prev => {
           if (player && syncedState.players[player.id]) {
             setPlayer(prevP => {
@@ -168,23 +178,39 @@ const App: React.FC = () => {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username) return;
     if (isInitializing) return;
 
+    // Guest Mode
+    let finalUsername = username.trim();
+    if (!finalUsername) {
+        finalUsername = `Guest_${Math.floor(Math.random()*9999)}`;
+    }
+
     try {
-      const user = await gameService.login(username);
+      const user = await gameService.login(finalUsername, password);
       setPlayer(user);
-      localStorage.setItem('geoconquest_user', JSON.stringify(user));
+      if (password) {
+        // Only save session if secured
+        localStorage.setItem('geoconquest_user', JSON.stringify(user));
+      }
       setStatus(GameStatus.SETUP);
       addChatMessage(`Agent ${user.username} connected.`, "System", true);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      setMessage("Login failed. Check Connection.");
+      setMessage(error.message || "Login failed.");
     }
   };
 
   const handleStartGame = async () => {
     if (!player || !gameState.selectedTerritoryId) return;
+
+    // SETUP RULE: Cannot start on occupied territory
+    const tStart = gameState.territories[gameState.selectedTerritoryId];
+    if (tStart && tStart.ownerId && tStart.ownerId !== player.id) {
+        showToast(t.error_occupied, 'error');
+        return;
+    }
+
     try {
       await gameService.captureTerritory(player.id, gameState.selectedTerritoryId);
       setStatus(GameStatus.PLAYING);
@@ -206,17 +232,27 @@ const App: React.FC = () => {
     const clickedTerritory = gameState.territories[clickedId]; 
     if (!clickedTerritory) return; 
 
-    // Visual feedback
+    // 1. Clicked OWNED territory -> Select it (allows upgrades)
     if (clickedTerritory.ownerId === player.id) {
       setGameState(prev => ({ ...prev, selectedTerritoryId: clickedId }));
     } else {
+      // 2. Clicked ENEMY/NEUTRAL -> Attempt Attack
       if (gameState.selectedTerritoryId) {
-        // Attack Logic
         const source = gameState.territories[gameState.selectedTerritoryId];
-        const result = await gameService.attackTerritory(player.id, gameState.selectedTerritoryId, clickedId);
-        
-        // Show combat text
+        let attackSuccess = false;
+
         if (source) {
+          // GAMEPLAY RULE: Adjacency Check
+          if (!gameService.isAdjacent(source, clickedTerritory)) {
+             showToast(t.error_adjacent, 'error');
+             return;
+          }
+
+          // Attack Logic
+          const result = await gameService.attackTerritory(player.id, gameState.selectedTerritoryId, clickedId);
+          attackSuccess = result.success;
+
+          // Show combat text
           if (result.success) {
             addVisualEffect("VICTORY", clickedTerritory.lat, clickedTerritory.lng, 'heal');
             addVisualEffect("-1", source.lat, source.lng, 'info');
@@ -236,7 +272,7 @@ const App: React.FC = () => {
         setGameState(prev => ({
            ...prev, 
            ...newState,
-           selectedTerritoryId: result.success ? null : prev.selectedTerritoryId
+           selectedTerritoryId: attackSuccess ? null : prev.selectedTerritoryId
         }));
       } else {
         showToast(t.cmd_select, 'info');
@@ -361,17 +397,30 @@ const App: React.FC = () => {
                   type="text" 
                   value={username}
                   onChange={e => setUsername(e.target.value)}
-                  className="w-full bg-black/50 border border-gray-700 rounded-lg p-3 text-white focus:border-neon-blue focus:outline-none focus:shadow-[0_0_15px_rgba(0,243,255,0.3)] transition font-mono"
-                  placeholder="CODENAME"
-                  required
+                  className="w-full bg-black/50 border border-gray-700 rounded-lg p-3 text-white focus:border-neon-blue focus:outline-none focus:shadow-[0_0_15px_rgba(0,243,255,0.3)] transition font-mono mb-2"
+                  placeholder="CODENAME (Optional for Guest)"
                   maxLength={12}
                 />
+                 <label className="block text-xs uppercase tracking-wider text-gray-500 mb-1">{t.passwordOpt}</label>
+                <input 
+                  type="password" 
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  className="w-full bg-black/50 border border-gray-700 rounded-lg p-3 text-white focus:border-neon-blue focus:outline-none focus:shadow-[0_0_15px_rgba(0,243,255,0.3)] transition font-mono"
+                  placeholder="********"
+                />
               </div>
+              
+              <div className="bg-red-900/30 border border-red-500/50 p-2 rounded text-[10px] text-gray-300 flex items-start gap-2">
+                 <AlertTriangle size={14} className="text-red-500 shrink-0 mt-0.5" />
+                 {t.permadeathWarn}
+              </div>
+
               <button 
                 type="submit"
                 className="w-full bg-neon-blue hover:bg-cyan-400 text-black font-bold py-3 rounded-lg shadow-lg shadow-cyan-500/20 transition transform hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2"
               >
-                {t.loginBtn}
+                {username ? t.loginBtn : t.guestLogin}
               </button>
               
               <div className="flex justify-center gap-4 text-sm text-gray-500 mt-4 border-t border-gray-800 pt-4">
@@ -465,7 +514,7 @@ const App: React.FC = () => {
       {message && (
         <div className="absolute top-24 left-1/2 -translate-x-1/2 pointer-events-none z-[1100] w-max max-w-[90vw] animate-in slide-in-from-top-4 fade-in duration-300">
            <div className={`backdrop-blur-md border px-6 py-3 rounded-full shadow-[0_0_20px_rgba(0,0,0,0.5)] flex items-center gap-3 ${
-             message.includes("Error") || message.includes("Offline") || message.includes("Failed")
+             message.includes("Error") || message.includes("Offline") || message.includes("Failed") || message.includes("!")
              ? 'bg-red-900/80 border-red-500 text-white' 
              : 'bg-black/80 border-neon-blue/30 text-white'
            }`}>
