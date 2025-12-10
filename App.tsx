@@ -257,17 +257,10 @@ const App: React.FC = () => {
 
     // --- MODE: ITEM TARGETING ---
     if (targetingItem) {
-        if (targetingItem.type === 'player' || targetingItem.type === 'territory') {
-            // Usually beneficial, usually targeting self
-            // But some items like 'sabotage' (type=enemy) might be handled here if types confuse
-        }
-
         const result = await gameService.useItem(player.id, targetingItem.id, clickedId);
         showToast(result.message, result.success ? 'success' : 'error');
-        
         if (result.success) {
-            setTargetingItem(null); // Exit mode
-            // Add visual
+            setTargetingItem(null);
             addVisualEffect("ITEM USED", clickedTerritory.lat, clickedTerritory.lng, 'info');
         }
         return;
@@ -279,24 +272,22 @@ const App: React.FC = () => {
             setTransferSource(null); // Cancel
             return;
         }
-
         const sourceT = gameState.territories[transferSource];
         if (sourceT) {
             if (!gameService.isAdjacent(sourceT, clickedTerritory)) {
                 showToast(t.error_adjacent, 'error');
                 return;
             }
-            // Logic: Transfer half strength or fixed? Let's say 10 or half.
             const amount = Math.floor(sourceT.strength / 2);
             if (amount < 5) {
-                showToast("Not enough troops to transfer", 'error');
+                showToast("Not enough troops", 'error');
                 return;
             }
             const result = await gameService.transferTroops(player.id, transferSource, clickedId, amount);
             showToast(result.message, result.success ? 'success' : 'error');
             if (result.success) {
                 setTransferSource(null);
-                addVisualEffect(`moved ${amount}`, clickedTerritory.lat, clickedTerritory.lng, 'green');
+                addVisualEffect(`moved ${amount}`, clickedTerritory.lat, clickedTerritory.lng, 'heal');
             }
         }
         return;
@@ -308,43 +299,37 @@ const App: React.FC = () => {
     if (clickedTerritory.ownerId === player.id) {
       setGameState(prev => ({ ...prev, selectedTerritoryId: clickedId }));
     } else {
-      // 2. Clicked ENEMY/NEUTRAL -> Attempt Attack
+      // 2. Clicked ENEMY/NEUTRAL -> Attempt Attack from SELECTED owned territory
       if (gameState.selectedTerritoryId) {
         const source = gameState.territories[gameState.selectedTerritoryId];
-        let attackSuccess = false;
-
+        
+        // Validation: Must own source, and must be neighbor
         if (source && source.ownerId === player.id) {
           if (!gameService.isAdjacent(source, clickedTerritory)) {
              showToast(t.error_adjacent, 'error');
+             // Visual Cue could go here (e.g., draw red line)
              return;
           }
 
           const result = await gameService.attackTerritory(player.id, gameState.selectedTerritoryId, clickedId);
-          attackSuccess = result.success;
-
+          
           if (result.success) {
             addVisualEffect("VICTORY", clickedTerritory.lat, clickedTerritory.lng, 'heal');
             addVisualEffect("-1", source.lat, source.lng, 'info');
             addChatMessage(`${player.username} conquered ${clickedTerritory.name}!`, "System", true);
+            // Auto select conquered
+            setGameState(prev => ({ ...prev, selectedTerritoryId: clickedId }));
           } else {
-            if (result.message && result.message.includes("failed")) {
-               addVisualEffect("DEFENDED", clickedTerritory.lat, clickedTerritory.lng, 'damage');
-               addVisualEffect("-1", source.lat, source.lng, 'damage');
-            } else {
-               showToast(result.message || "Attack failed", 'error');
-            }
+             // Attack failed (Defense held)
+             if (result.message && result.message.includes("Defense")) {
+                addVisualEffect("BLOCKED", clickedTerritory.lat, clickedTerritory.lng, 'damage');
+             }
+             showToast(result.message || "Attack failed", 'error');
           }
         } else {
-             // If selected territory is NOT mine, I can't attack from it. Just select the new one.
+             // Selected was not mine, or null. Just change selection to target (to inspect it)
              setGameState(prev => ({ ...prev, selectedTerritoryId: clickedId }));
         }
-
-        const newState = await gameService.syncState(player.id);
-        setGameState(prev => ({
-           ...prev, 
-           ...newState,
-           selectedTerritoryId: attackSuccess ? null : prev.selectedTerritoryId
-        }));
       } else {
         setGameState(prev => ({ ...prev, selectedTerritoryId: clickedId }));
       }

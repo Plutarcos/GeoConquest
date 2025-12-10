@@ -47,6 +47,10 @@ CREATE TABLE IF NOT EXISTS players (
     last_seen BIGINT
 );
 
+-- Ensure columns exist (if table already existed)
+ALTER TABLE players ADD COLUMN IF NOT EXISTS inventory JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE players ADD COLUMN IF NOT EXISTS energy NUMERIC DEFAULT 100;
+
 -- 2. Create Territories Table
 CREATE TABLE IF NOT EXISTS territories (
     id TEXT PRIMARY KEY,
@@ -68,7 +72,7 @@ ALTER TABLE territories ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Public Players Access" ON players FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Public Territories Access" ON territories FOR ALL USING (true) WITH CHECK (true);
 
--- 5. Helper Functions
+-- 5. Helper Functions (SECURITY DEFINER added to bypass RLS issues inside functions)
 
 -- Purchase Item
 CREATE OR REPLACE FUNCTION purchase_item(
@@ -78,6 +82,7 @@ CREATE OR REPLACE FUNCTION purchase_item(
 ) 
 RETURNS BOOLEAN 
 LANGUAGE plpgsql 
+SECURITY DEFINER
 AS $$
 DECLARE
   current_money NUMERIC;
@@ -86,6 +91,10 @@ DECLARE
 BEGIN
   SELECT money, inventory INTO current_money, current_inv FROM players WHERE id = player_id;
   
+  IF current_money IS NULL THEN 
+     RETURN FALSE;
+  END IF;
+
   IF current_money >= cost THEN
     UPDATE players SET money = money - cost WHERE id = player_id;
     new_count := COALESCE((current_inv->>item_id)::INTEGER, 0) + 1;
@@ -99,7 +108,7 @@ BEGIN
 END;
 $$;
 
--- Attack Territory
+-- Attack Territory (UPDATED WITH DEFENSE BONUS)
 CREATE OR REPLACE FUNCTION attack_territory(
   attacker_id TEXT,
   source_id TEXT,
@@ -108,6 +117,7 @@ CREATE OR REPLACE FUNCTION attack_territory(
 )
 RETURNS JSONB
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
   att_strength INTEGER;
@@ -115,6 +125,7 @@ DECLARE
   attacker_energy NUMERIC;
   def_owner TEXT;
   def_territory_count INTEGER;
+  defense_bonus INTEGER;
 BEGIN
   SELECT strength, owner_id INTO att_strength, def_owner FROM territories WHERE id = source_id;
   SELECT strength, owner_id INTO def_strength, def_owner FROM territories WHERE id = target_id;
@@ -124,11 +135,16 @@ BEGIN
      RETURN jsonb_build_object('success', false, 'message', 'Recursos insuficientes');
   END IF;
 
+  -- Consume Energy & Source Strength immediately
   UPDATE players SET energy = energy - energy_cost WHERE id = attacker_id;
   UPDATE territories SET strength = 1 WHERE id = source_id;
 
-  IF att_strength > def_strength THEN
-     UPDATE territories SET strength = (att_strength - def_strength), owner_id = attacker_id WHERE id = target_id;
+  -- Defense Bonus Calculation (20% bonus for defender)
+  defense_bonus := FLOOR(def_strength * 1.2);
+
+  IF att_strength > defense_bonus THEN
+     -- Attacker Wins
+     UPDATE territories SET strength = (att_strength - defense_bonus), owner_id = attacker_id WHERE id = target_id;
      
      -- PERMADEATH CHECK
      IF def_owner IS NOT NULL THEN
@@ -140,8 +156,34 @@ BEGIN
 
      RETURN jsonb_build_object('success', true, 'message', 'Conquistado');
   ELSE
-     UPDATE territories SET strength = GREATEST(1, def_strength - (att_strength / 2)) WHERE id = target_id;
-     RETURN jsonb_build_object('success', false, 'message', 'Defesa resistiu');
+     -- Defender Wins (Attacker lost troops, Defender takes damage but holds)
+     -- Defender loses troops proportional to attack, but keeps at least 1
+     UPDATE territories SET strength = GREATEST(1, def_strength - FLOOR(att_strength * 0.8)) WHERE id = target_id;
+     RETURN jsonb_build_object('success', false, 'message', 'Defesa resistiu (+20% Bônus)');
+  END IF;
+END;
+$$;
+
+-- Passive Growth (NEW)
+CREATE OR REPLACE FUNCTION passive_territory_growth(player_id TEXT)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  terr_count INTEGER;
+BEGIN
+  -- 1. Increase Strength of all owned territories by 1 (up to max 100 passively)
+  UPDATE territories 
+  SET strength = strength + 1 
+  WHERE owner_id = player_id AND strength < 100;
+
+  -- 2. Give Income
+  SELECT COUNT(*) INTO terr_count FROM territories WHERE owner_id = player_id;
+  IF terr_count > 0 THEN
+    UPDATE players 
+    SET money = money + (terr_count * 5) -- 5 credits per territory
+    WHERE id = player_id;
   END IF;
 END;
 $$;
@@ -154,6 +196,7 @@ CREATE OR REPLACE FUNCTION use_item(
 )
 RETURNS JSONB
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
   current_inv JSONB;
@@ -199,6 +242,7 @@ CREATE OR REPLACE FUNCTION transfer_strength(
 )
 RETURNS BOOLEAN
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
   source_str INTEGER;
@@ -216,221 +260,165 @@ BEGIN
   RETURN TRUE;
 END;
 $$;
-`;
-
-export const SHOP_ITEMS = [
-  { id: 'recruit', cost: 50, nameKey: 'recruit_troops', effect: '+10 Str', icon: 'UserPlus', type: 'territory' },
-  { id: 'fortify', cost: 100, nameKey: 'fortify_base', effect: '+20 Str', icon: 'Shield', type: 'territory' },
-  { id: 'bunker', cost: 250, nameKey: 'bunker_defense', effect: '+50 Str', icon: 'ShieldCheck', type: 'territory' },
-  { id: 'stimpack', cost: 150, nameKey: 'stimpack', effect: '+50 Energy', icon: 'Zap', type: 'player' },
-  { id: 'sabotage', cost: 200, nameKey: 'sabotage_enemy', effect: '-15 Enemy', icon: 'Skull', type: 'enemy' },
-  { id: 'airstrike', cost: 500, nameKey: 'air_strike', effect: '-50 Enemy', icon: 'Crosshair', type: 'enemy' },
-];
 
 export const TRANSLATIONS = {
   'pt-BR': {
-    gameTitle: "GEOCONQUISTA",
-    subTitle: "Dominação de Bairros em Tempo Real",
-    loginPrompt: "Insira seu Codinome",
-    loginBtn: "INICIAR UPLINK",
-    scanning: "Triangulando Posição...",
-    selectBase: "SELECIONE BASE INICIAL",
-    selectBaseDesc: "Sua localização real foi detectada. Inicie dominando o setor onde você está.",
-    located: "Setor Identificado",
-    startConquest: "INICIAR CONQUISTA",
-    territories: "Setores",
-    strength: "Força",
-    money: "Créditos",
-    shop: "Loja",
-    inventory: "Mochila",
-    use: "USAR",
-    move: "Mover",
-    transfer: "Transferir Tropas",
-    cancel: "Cancelar",
-    reset: "Resetar",
-    logout: "Sair",
-    recruit_troops: "Reforços (+10)",
-    fortify_base: "Fortificar (+20)",
-    bunker_defense: "Bunker (+50)",
-    stimpack: "Stimpack (+50 En)",
-    sabotage_enemy: "Sabotar (-15)",
-    air_strike: "Ataque Aéreo (-50)",
-    buy: "Comprar",
-    close: "Fechar",
-    active: "Conectado",
-    chat: "Comunicação",
-    sendMessage: "Enviar mensagem...",
-    newMsg: "Nova Msg",
-    permadeathWarn: "Atenção: Se perder todos os territórios, sua conta será deletada.",
-    guestLogin: "Entrar como Convidado",
-    error_occupied: "Setor Ocupado! Escolha outro para iniciar.",
-    error_adjacent: "Alvo muito distante! Deve ser adjacente.",
-    select_target: "Selecione um alvo no mapa",
-    select_transfer: "Selecione destino da transferência",
-    item_bought: "Item adicionado à mochila"
+    territories: 'Territórios',
+    strength: 'Força',
+    active: 'Online',
+    offline: 'Offline',
+    transfer: 'Transferir',
+    chat: 'Chat',
+    shop: 'Loja',
+    inventory: 'Mochila',
+    logout: 'Sair',
+    gameTitle: 'GEO CONQUEST',
+    subTitle: 'Dominação Global Baseada em Localização',
+    loginPrompt: 'Identificação do Agente',
+    permadeathWarn: 'Aviso: Se todas as suas bases forem capturadas, sua conta será deletada permanentemente.',
+    loginBtn: 'Conectar',
+    guestLogin: 'Entrar como Convidado',
+    selectBase: 'Estabelecer Base',
+    selectBaseDesc: 'Selecione um setor vazio no mapa para iniciar suas operações.',
+    scanning: 'Escaneando Localização...',
+    startConquest: 'Iniciar Conquista',
+    located: 'Localização Confirmada',
+    error_occupied: 'Este setor já está ocupado!',
+    error_adjacent: 'Alvo fora de alcance! Ataque apenas setores adjacentes.',
+    select_target: 'Selecione um Alvo no Mapa',
+    select_transfer: 'Selecione Destino para Transferência',
+    money: 'Créditos',
+    buy: 'COMPRAR',
+    use: 'USAR',
+    sendMessage: 'Enviar mensagem...',
+    item_recruit: 'Recrutar (+10)',
+    item_fortify: 'Fortificar (+20)',
+    item_bunker: 'Bunker (+50)',
+    item_sabotage: 'Sabotar (-15)',
+    item_airstrike: 'Ataque Aéreo (-50)',
+    item_stimpack: 'Estimulante (+50 Energia)'
   },
   'en': {
-    gameTitle: "GEOCONQUEST",
-    subTitle: "Real-time Neighborhood Domination",
-    loginPrompt: "Enter Codename",
-    loginBtn: "INITIALIZE UPLINK",
-    scanning: "Triangulating Position...",
-    selectBase: "SELECT STARTING BASE",
-    selectBaseDesc: "Your real location detected. Start by dominating your current sector.",
-    located: "Sector Identified",
-    startConquest: "START CONQUEST",
-    territories: "Sectors",
-    strength: "Strength",
-    money: "Credits",
-    shop: "Shop",
-    inventory: "Inventory",
-    use: "USE",
-    move: "Move",
-    transfer: "Transfer Troops",
-    cancel: "Cancel",
-    reset: "Reset",
-    logout: "Logout",
-    recruit_troops: "Reinforcements (+10)",
-    fortify_base: "Fortify (+20)",
-    bunker_defense: "Bunker (+50)",
-    stimpack: "Stimpack (+50 En)",
-    sabotage_enemy: "Sabotage (-15)",
-    air_strike: "Air Strike (-50)",
-    buy: "Buy",
-    close: "Close",
-    active: "Connected",
-    chat: "Comms",
-    sendMessage: "Send message...",
-    newMsg: "New Msg",
-    permadeathWarn: "Warning: If you lose all territories, account is deleted.",
-    guestLogin: "Login as Guest",
-    error_occupied: "Sector Occupied! Choose another to start.",
-    error_adjacent: "Target too far! Must be adjacent.",
-    select_target: "Select a target on the map",
-    select_transfer: "Select transfer destination",
-    item_bought: "Item added to inventory"
+    territories: 'Territories',
+    strength: 'Strength',
+    active: 'Online',
+    offline: 'Offline',
+    transfer: 'Transfer',
+    chat: 'Chat',
+    shop: 'Shop',
+    inventory: 'Inventory',
+    logout: 'Logout',
+    gameTitle: 'GEO CONQUEST',
+    subTitle: 'Location Based Global Domination',
+    loginPrompt: 'Agent Identification',
+    permadeathWarn: 'Warning: If all your bases are captured, your account is permanently deleted.',
+    loginBtn: 'Connect',
+    guestLogin: 'Login as Guest',
+    selectBase: 'Establish Base',
+    selectBaseDesc: 'Select an empty sector on the map to start operations.',
+    scanning: 'Scanning Location...',
+    startConquest: 'Start Conquest',
+    located: 'Location Confirmed',
+    error_occupied: 'Sector already occupied!',
+    error_adjacent: 'Target out of range! Attack adjacent sectors only.',
+    select_target: 'Select Target on Map',
+    select_transfer: 'Select Transfer Destination',
+    money: 'Credits',
+    buy: 'BUY',
+    use: 'USE',
+    sendMessage: 'Send message...',
+    item_recruit: 'Recruit (+10)',
+    item_fortify: 'Fortify (+20)',
+    item_bunker: 'Bunker (+50)',
+    item_sabotage: 'Sabotage (-15)',
+    item_airstrike: 'Airstrike (-50)',
+    item_stimpack: 'Stimpack (+50 Energy)'
   },
   'es': {
-    gameTitle: "GEOCONQUISTA",
-    subTitle: "Dominación de Barrios",
-    loginPrompt: "Ingrese Nombre en Clave",
-    loginBtn: "INICIAR ENLACE",
-    scanning: "Triangulando...",
-    selectBase: "SELECCIONAR BASE INICIAL",
-    selectBaseDesc: "Ubicación detectada. Domina tu sector actual.",
-    located: "Sector Identificado",
-    startConquest: "INICIAR CONQUISTA",
-    territories: "Sectores",
-    strength: "Fuerza",
-    money: "Créditos",
-    shop: "Tienda",
-    inventory: "Inventario",
-    use: "USAR",
-    move: "Mover",
-    transfer: "Transferir Tropas",
-    cancel: "Cancelar",
-    reset: "Reiniciar",
-    logout: "Salir",
-    recruit_troops: "Refuerzos (+10)",
-    fortify_base: "Fortificar (+20)",
-    bunker_defense: "Búnker (+50)",
-    stimpack: "Stimpack (+50 En)",
-    sabotage_enemy: "Sabotear (-15)",
-    air_strike: "Ataque Aéreo (-50)",
-    buy: "Comprar",
-    close: "Cerrar",
-    active: "Conectado",
-    chat: "Coms",
-    sendMessage: "Enviar mensaje...",
-    newMsg: "Nuevo",
-    permadeathWarn: "Aviso: Si pierdes todo, se borra la cuenta.",
-    guestLogin: "Entrar como Invitado",
-    error_occupied: "Sector Ocupado! Elige otro.",
-    error_adjacent: "Objetivo lejano. Debe ser adyacente.",
-    select_target: "Selecciona un objetivo",
-    select_transfer: "Selecciona destino",
-    item_bought: "Ítem añadido al inventario"
-  },
-  'de': {
-    gameTitle: "GEOEROBERUNG",
-    subTitle: "Nachbarschaftsherrschaft",
-    loginPrompt: "Decknamen eingeben",
-    loginBtn: "VERBINDUNG STARTEN",
-    scanning: "Trianguliere...",
-    selectBase: "STARTBASIS WÄHLEN",
-    selectBaseDesc: "Standort erkannt. Erobert euren aktuellen Sektor.",
-    located: "Sektor Identifiziert",
-    startConquest: "EROBERUNG STARTEN",
-    territories: "Sektoren",
-    strength: "Stärke",
-    money: "Credits",
-    shop: "Laden",
-    inventory: "Inventar",
-    use: "BENUTZEN",
-    move: "Bewegen",
-    transfer: "Truppen verlegen",
-    cancel: "Abbrechen",
-    reset: "Zurücksetzen",
-    logout: "Ausloggen",
-    recruit_troops: "Verstärkung (+10)",
-    fortify_base: "Befestigen (+20)",
-    bunker_defense: "Bunker (+50)",
-    stimpack: "Stimpack (+50 En)",
-    sabotage_enemy: "Sabotage (-15)",
-    air_strike: "Luftangriff (-50)",
-    buy: "Kaufen",
-    close: "Schließen",
-    active: "Verbunden",
-    chat: "Komm",
-    sendMessage: "Nachricht senden...",
-    newMsg: "Neu",
-    permadeathWarn: "Warnung: Bei totalem Verlust wird das Konto gelöscht.",
-    guestLogin: "Als Gast",
-    error_occupied: "Sektor besetzt! Wähle einen anderen.",
-    error_adjacent: "Zu weit! Muss benachbart sein.",
-    select_target: "Ziel auf der Karte wählen",
-    select_transfer: "Ziel wählen",
-    item_bought: "Item zum Inventar hinzugefügt"
-  },
-  'zh': {
-    gameTitle: "地缘征服",
-    subTitle: "街区统治",
-    loginPrompt: "输入代号",
-    loginBtn: "启动连接",
-    scanning: "定位中...",
-    selectBase: "选择起始基地",
-    selectBaseDesc: "已检测到位置。开始征服你当前的区域。",
-    located: "区域已确认",
-    startConquest: "开始征服",
-    territories: "区域",
-    strength: "兵力",
-    money: "资金",
-    shop: "商店",
-    inventory: "库存",
-    use: "使用",
-    move: "移动",
-    transfer: "转移部队",
-    cancel: "取消",
-    reset: "重置",
-    logout: "登出",
-    recruit_troops: "增援 (+10)",
-    fortify_base: "加固 (+20)",
-    bunker_defense: "地堡 (+50)",
-    stimpack: "兴奋剂 (+50 En)",
-    sabotage_enemy: "破坏 (-15)",
-    air_strike: "空袭 (-50)",
-    buy: "购买",
-    close: "关闭",
-    active: "已连接",
-    chat: "通讯",
-    sendMessage: "发送消息...",
-    newMsg: "新消息",
-    permadeathWarn: "警告：如果失去所有领土，账户将被删除。",
-    guestLogin: "游客登录",
-    error_occupied: "区域已被占领！请选择其他区域。",
-    error_adjacent: "目标太远！必须相邻。",
-    select_target: "在地图上选择目标",
-    select_transfer: "选择转移目的地",
-    item_bought: "物品已存入"
+    territories: 'Territorios',
+    strength: 'Fuerza',
+    active: 'En Línea',
+    offline: 'Desconectado',
+    transfer: 'Transferir',
+    chat: 'Chat',
+    shop: 'Tienda',
+    inventory: 'Inventario',
+    logout: 'Salir',
+    gameTitle: 'GEO CONQUEST',
+    subTitle: 'Dominación Global Basada en Ubicación',
+    loginPrompt: 'Identificación de Agente',
+    permadeathWarn: 'Advertencia: Si capturan todas tus bases, tu cuenta será eliminada permanentemente.',
+    loginBtn: 'Conectar',
+    guestLogin: 'Entrar como Invitado',
+    selectBase: 'Establecer Base',
+    selectBaseDesc: 'Selecciona un sector vacío para iniciar operaciones.',
+    scanning: 'Escaneando Ubicación...',
+    startConquest: 'Iniciar Conquista',
+    located: 'Ubicación Confirmada',
+    error_occupied: '¡Sector ya ocupado!',
+    error_adjacent: '¡Objetivo fuera de alcance! Ataca solo sectores adyacentes.',
+    select_target: 'Selecciona Objetivo en Mapa',
+    select_transfer: 'Selecciona Destino',
+    money: 'Créditos',
+    buy: 'COMPRAR',
+    use: 'USAR',
+    sendMessage: 'Enviar mensaje...',
+    item_recruit: 'Reclutar (+10)',
+    item_fortify: 'Fortificar (+20)',
+    item_bunker: 'Bunker (+50)',
+    item_sabotage: 'Sabotaje (-15)',
+    item_airstrike: 'Ataque Aéreo (-50)',
+    item_stimpack: 'Estimulante (+50 Energía)'
   }
 };
+
+export const SHOP_ITEMS = [
+  {
+    id: 'recruit',
+    nameKey: 'item_recruit',
+    cost: 50,
+    effect: '+10 Strength',
+    icon: 'UserPlus',
+    type: 'territory'
+  },
+  {
+    id: 'fortify',
+    nameKey: 'item_fortify',
+    cost: 100,
+    effect: '+20 Strength',
+    icon: 'Shield',
+    type: 'territory'
+  },
+  {
+    id: 'stimpack',
+    nameKey: 'item_stimpack',
+    cost: 75,
+    effect: '+50 Energy',
+    icon: 'Zap',
+    type: 'player'
+  },
+  {
+    id: 'sabotage',
+    nameKey: 'item_sabotage',
+    cost: 150,
+    effect: '-15 Strength (Enemy)',
+    icon: 'Skull',
+    type: 'enemy'
+  },
+  {
+    id: 'bunker',
+    nameKey: 'item_bunker',
+    cost: 300,
+    effect: '+50 Strength',
+    icon: 'ShieldCheck',
+    type: 'territory'
+  },
+  {
+    id: 'airstrike',
+    nameKey: 'item_airstrike',
+    cost: 500,
+    effect: '-50 Strength (Enemy)',
+    icon: 'Crosshair',
+    type: 'enemy'
+  }
+];

@@ -118,14 +118,15 @@ export class GameService {
             .eq('id', id)
             .single();
 
+        // PGRST116 means "No rows found" (User doesn't exist yet)
         if (error && error.code !== 'PGRST116') {
-            // Real database error (connection, etc)
             console.error("Fetch Error:", error);
-            throw error;
+            // Allow 406 to pass through as not found in some Supabase versions
+            if (error.code !== '406') throw error;
         }
 
-        // 2. If not found (PGRST116), CREATE the user
-        if (!data) {
+        // 2. If not found, CREATE the user
+        if (!data || (error && (error.code === 'PGRST116' || error.code === '406'))) {
             console.log("User not found, creating new one...");
             const { data: newData, error: createError } = await this.supabase
                 .from('players')
@@ -178,7 +179,7 @@ export class GameService {
         return { ...this.state, connected: false };
     }
 
-    // Process Passive Growth/Money Loop (Client-side simulation of cron)
+    // Process Passive Growth (Server RPC Trigger)
     const now = Date.now();
     if (now - this.lastPassiveTick > 10000 && currentPlayerId) {
         this.processPassiveGrowth(currentPlayerId);
@@ -275,20 +276,12 @@ export class GameService {
 
   private async processPassiveGrowth(playerId: string) {
      if(!this.supabase) return;
-
-     // 1. Grow Strength of Owned Territories
-     // 2. Give Money
-     const { data: myTerrs } = await this.supabase.from('territories').select('id').eq('owner_id', playerId);
-     if (myTerrs && myTerrs.length > 0) {
-         // Money
-         const income = myTerrs.length * INCOME_PER_TERRITORY;
-         await this.supabase.from('players').update({ money: this.state.players[playerId].money + income }).eq('id', playerId);
-
-         // Strength
-         const terrIds = myTerrs.map(t => t.id);
-         // Increase strength by 1, max 5000
-         // We can't do complex math in simple update easily without RPC, so let's skip strength growth for now or assume server handles it
-         // Or update one by one (slow). Let's assume the anti-cheat allows small updates.
+     // Invoke the Supabase RPC function that handles logic securely
+     // We don't await this strictly to avoid blocking UI
+     try {
+         await this.supabase.rpc('passive_territory_growth', { player_id: playerId });
+     } catch (error) {
+         // Silently fail or log if needed
      }
   }
 
@@ -341,7 +334,7 @@ export class GameService {
     });
 
     if (error) {
-        console.error(error);
+        console.error("Attack error:", error);
         return { success: false, message: "Erro no ataque" };
     }
     return data;
@@ -352,14 +345,76 @@ export class GameService {
   public async purchaseItem(playerId: string, itemId: string, cost: number): Promise<{success: boolean, message: string}> {
       if (!this.supabase) return { success: false, message: "Offline" };
       
-      const { data, error } = await this.supabase.rpc('purchase_item', {
-          player_id: playerId,
-          item_id: itemId,
-          cost: cost
-      });
+      let rpcFailed = false;
 
-      if (error || !data) return { success: false, message: "Fundos insuficientes" };
-      return { success: true, message: "Comprado" };
+      // 1. Try RPC (Secure Server-side)
+      try {
+          const { data, error } = await this.supabase.rpc('purchase_item', {
+              player_id: playerId,
+              item_id: itemId,
+              cost: cost
+          });
+
+          if (error) {
+              console.warn("RPC Failed (Database function error). Attempting Client-Side Fallback...", error.message);
+              rpcFailed = true;
+          } else {
+              // RPC executed successfully
+              if (data === false) return { success: false, message: "Fundos insuficientes" };
+              return { success: true, message: "Comprado" };
+          }
+      } catch (e) {
+          console.warn("RPC Exception:", e);
+          rpcFailed = true;
+      }
+
+      // 2. Fallback: Client-side Transaction (Robustness for broken/missing SQL functions)
+      if (rpcFailed) {
+         try {
+             // A. Fetch current state manually
+             const { data: player, error: fetchError } = await this.supabase
+                 .from('players')
+                 .select('money, inventory')
+                 .eq('id', playerId)
+                 .single();
+             
+             if (fetchError || !player) throw new Error("Fetch player failed during fallback");
+
+             const currentMoney = Number(player.money);
+             if (currentMoney < cost) return { success: false, message: "Fundos insuficientes" };
+
+             const inventory = player.inventory || {};
+             const currentCount = (inventory[itemId] || 0);
+             
+             // B. Calculate new state
+             const updates = {
+                 money: currentMoney - cost,
+                 inventory: {
+                     ...inventory,
+                     [itemId]: currentCount + 1
+                 }
+             };
+
+             // C. Update manually
+             const { error: updateError } = await this.supabase
+                 .from('players')
+                 .update(updates)
+                 .eq('id', playerId);
+
+             if (updateError) {
+                 console.error("Fallback update error:", updateError);
+                 return { success: false, message: "Erro ao processar compra" };
+             }
+             
+             return { success: true, message: "Comprado" };
+
+         } catch (e) {
+             console.error("Critical Purchase Failure:", e);
+             return { success: false, message: "Erro fatal na compra" };
+         }
+      }
+
+      return { success: false, message: "Erro desconhecido" };
   }
 
   public async useItem(playerId: string, itemId: string, targetTerritoryId?: string): Promise<{success: boolean, message: string}> {
@@ -371,7 +426,10 @@ export class GameService {
           target_territory_id: targetTerritoryId || null
       });
 
-      if (error) return { success: false, message: "Erro ao usar item" };
+      if (error) {
+          console.error("Use Item Error:", error);
+          return { success: false, message: "Erro ao usar item" };
+      }
       return data;
   }
 

@@ -1,6 +1,7 @@
 
+
 import React, { memo, useEffect, useRef } from 'react';
-import { MapContainer, TileLayer, Rectangle, Tooltip, useMap, Marker } from 'react-leaflet';
+import { MapContainer, TileLayer, Rectangle, Tooltip, useMap, Marker, Polyline } from 'react-leaflet';
 import L, { LatLngExpression } from 'leaflet';
 import { MAP_TILE_URL, MAP_ATTRIBUTION, COLORS, GRID_SIZE } from '../constants';
 import { Territory, Player, VisualEffect } from '../types';
