@@ -18,28 +18,28 @@ export const Inventory: React.FC<InventoryProps> = ({ player, language, onUseIte
   
   const getIcon = (iconName: string) => {
     switch (iconName) {
-      case 'UserPlus': return <UserPlus size={28} />;
-      case 'Shield': return <Shield size={28} />;
-      case 'Skull': return <Skull size={28} />;
-      case 'Zap': return <Zap size={28} />;
-      case 'Crosshair': return <Crosshair size={28} />;
-      case 'ShieldCheck': return <ShieldCheck size={28} />;
-      default: return <Backpack size={28} />;
+      case 'UserPlus': return <UserPlus size={24} />;
+      case 'Shield': return <Shield size={24} />;
+      case 'Skull': return <Skull size={24} />;
+      case 'Zap': return <Zap size={24} />;
+      case 'Crosshair': return <Crosshair size={24} />;
+      case 'ShieldCheck': return <ShieldCheck size={24} />;
+      default: return <Backpack size={24} />;
     }
   };
 
   const ownedItems = SHOP_ITEMS.filter(shopItem => (items[shopItem.id] || 0) > 0);
 
   return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md animate-in fade-in p-4">
-      <div className="bg-panel-bg border border-neon-green/50 rounded-2xl w-full max-w-2xl h-[70vh] flex flex-col shadow-[0_0_50px_rgba(10,255,0,0.1)] relative">
+    <div className="absolute inset-0 z-[1300] flex items-center justify-center bg-black/80 backdrop-blur-md animate-in fade-in p-4">
+      <div className="bg-panel-bg border border-neon-green/50 rounded-2xl w-full max-w-lg h-[60vh] md:h-[70vh] flex flex-col shadow-[0_0_50px_rgba(10,255,0,0.1)] relative overflow-hidden">
         
-        <div className="p-6 border-b border-gray-700 flex justify-between items-center bg-black/20">
+        <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-black/30">
             <div className="flex items-center gap-3">
                 <div className="bg-neon-green/20 p-2 rounded-lg text-neon-green">
-                   <Backpack size={28} />
+                   <Backpack size={24} />
                 </div>
-                <h2 className="text-2xl font-bold text-white tracking-wide">{t.inventory}</h2>
+                <h2 className="text-xl font-bold text-white tracking-wide">{t.inventory}</h2>
             </div>
             <button onClick={onClose} className="text-gray-400 hover:text-white hover:bg-white/10 p-2 rounded-full transition">
                 <X size={24} />
@@ -48,38 +48,36 @@ export const Inventory: React.FC<InventoryProps> = ({ player, language, onUseIte
 
         {ownedItems.length === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center text-gray-500 gap-4">
-                <Backpack size={64} strokeWidth={1} className="opacity-20" />
-                <p className="italic text-lg">Mochila Vazia</p>
+                <Backpack size={48} strokeWidth={1} className="opacity-20" />
+                <p className="italic text-sm">Mochila Vazia</p>
             </div>
         ) : (
-            <div className="flex-1 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-gray-600">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="flex-1 overflow-y-auto p-4 scrollbar-thin scrollbar-thumb-gray-600">
+                <div className="grid grid-cols-1 gap-3">
                     {ownedItems.map((item) => (
-                        <div key={item.id} className="bg-black/40 border border-gray-700 p-5 rounded-xl flex flex-col gap-4 hover:border-gray-500 transition-all hover:bg-black/60">
+                        <div key={item.id} className="bg-black/40 border border-gray-700 p-3 rounded-xl flex items-center justify-between hover:border-gray-500 transition-all hover:bg-black/60">
                             
-                            <div className="flex justify-between items-start">
-                                <div className="flex items-center gap-3">
-                                    <div className="text-neon-green p-2 bg-gray-900 rounded-lg border border-gray-700">
-                                        {getIcon(item.icon)}
-                                    </div>
-                                    <div>
-                                        <h3 className="font-bold text-white text-lg">{(t as any)[item.nameKey]}</h3>
-                                        <div className="inline-flex items-center gap-1 text-[10px] uppercase font-bold text-gray-400 bg-gray-800 px-2 py-0.5 rounded-full mt-1">
-                                            {item.type === 'player' ? t.targets_player : item.type === 'enemy' ? t.targets_enemy : t.targets_own}
-                                        </div>
-                                    </div>
+                            <div className="flex items-center gap-3">
+                                <div className="text-neon-green p-2 bg-gray-900 rounded-lg border border-gray-700 shrink-0">
+                                    {getIcon(item.icon)}
                                 </div>
-                                <div className="text-2xl font-mono font-bold text-white opacity-50">
-                                    x{items[item.id]}
+                                <div>
+                                    <h3 className="font-bold text-white text-sm">{(t as any)[item.nameKey]}</h3>
+                                    <div className="inline-flex items-center gap-1 text-[9px] uppercase font-bold text-gray-400 bg-gray-800 px-2 py-0.5 rounded-full mt-1">
+                                        {item.type === 'player' ? t.targets_player : item.type === 'enemy' ? t.targets_enemy : t.targets_own}
+                                    </div>
                                 </div>
                             </div>
 
-                            <button
-                                onClick={() => onUseItem(item.id, item.type as ShopItem['type'])}
-                                className="w-full py-3 rounded-lg font-bold text-xs bg-neon-green text-black hover:bg-green-400 uppercase tracking-wider shadow-lg shadow-green-500/10 flex items-center justify-center gap-2 transition-transform active:scale-95"
-                            >
-                                {t.use} <ArrowUpRight size={16} />
-                            </button>
+                            <div className="flex items-center gap-3">
+                                <span className="font-mono text-gray-400 text-sm">x{items[item.id]}</span>
+                                <button
+                                    onClick={() => onUseItem(item.id, item.type as ShopItem['type'])}
+                                    className="px-3 py-2 rounded-lg font-bold text-[10px] bg-neon-green text-black hover:bg-green-400 uppercase tracking-wider shadow-lg shadow-green-500/10 flex items-center gap-1 transition-transform active:scale-95"
+                                >
+                                    {t.use} <ArrowUpRight size={12} />
+                                </button>
+                            </div>
                         </div>
                     ))}
                 </div>

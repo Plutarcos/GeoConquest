@@ -34,8 +34,6 @@ export const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiO
 
 // SQL Commands Reference
 export const SQL_INIT_COMMANDS = `
--- COPY AND PASTE THIS INTO SUPABASE SQL EDITOR TO FIX DATABASE
-
 -- 1. Create Players Table
 CREATE TABLE IF NOT EXISTS players (
     id TEXT PRIMARY KEY,
@@ -47,10 +45,6 @@ CREATE TABLE IF NOT EXISTS players (
     last_seen BIGINT
 );
 
--- Ensure columns exist (if table already existed)
-ALTER TABLE players ADD COLUMN IF NOT EXISTS inventory JSONB DEFAULT '{}'::jsonb;
-ALTER TABLE players ADD COLUMN IF NOT EXISTS energy NUMERIC DEFAULT 100;
-
 -- 2. Create Territories Table
 CREATE TABLE IF NOT EXISTS territories (
     id TEXT PRIMARY KEY,
@@ -61,20 +55,31 @@ CREATE TABLE IF NOT EXISTS territories (
     lng FLOAT NOT NULL
 );
 
--- 3. Enable Realtime
+-- 3. Create Messages Table (NEW)
+CREATE TABLE IF NOT EXISTS messages (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    sender TEXT NOT NULL,
+    text TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 4. Enable Realtime
 alter publication supabase_realtime add table territories;
 alter publication supabase_realtime add table players;
+alter publication supabase_realtime add table messages;
 
--- 4. Enable Public Access (Since we use custom auth)
+-- 5. Enable Public Access
 ALTER TABLE players ENABLE ROW LEVEL SECURITY;
 ALTER TABLE territories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Public Players Access" ON players FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Public Territories Access" ON territories FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Public Messages Access" ON messages FOR ALL USING (true) WITH CHECK (true);
 
--- 5. Helper Functions (SECURITY DEFINER added to bypass RLS issues inside functions)
+-- 6. Helper Functions
 
--- Purchase Item (FIXED: JSONB Handling)
+-- Purchase Item (FIXED v2)
 CREATE OR REPLACE FUNCTION purchase_item(
   player_id TEXT, 
   item_id TEXT, 
@@ -89,34 +94,29 @@ DECLARE
   current_inv JSONB;
   new_count INTEGER;
 BEGIN
-  -- Explicitly cast inventory to ensure it is treated as JSONB
-  SELECT money, COALESCE(inventory::jsonb, '{}'::jsonb) INTO current_money, current_inv 
+  SELECT money, COALESCE(inventory, '{}'::jsonb) INTO current_money, current_inv 
   FROM players WHERE id = player_id;
   
-  IF current_money IS NULL THEN 
+  IF current_money IS NULL OR current_money < cost THEN 
      RETURN FALSE;
   END IF;
 
-  IF current_money >= cost THEN
-    -- Deduct Money
-    UPDATE players SET money = money - cost WHERE id = player_id;
-    
-    -- Calculate new count
-    new_count := COALESCE((current_inv->>item_id)::INTEGER, 0) + 1;
-    
-    -- Update Inventory safely
-    UPDATE players 
-    SET inventory = jsonb_set(current_inv, ARRAY[item_id], to_jsonb(new_count))
-    WHERE id = player_id;
-    
-    RETURN TRUE;
-  ELSE
-    RETURN FALSE;
-  END IF;
+  -- Update Money
+  UPDATE players SET money = money - cost WHERE id = player_id;
+  
+  -- Calculate new count
+  new_count := COALESCE((current_inv->>item_id)::INTEGER, 0) + 1;
+  
+  -- Update Inventory
+  UPDATE players 
+  SET inventory = jsonb_set(current_inv, ARRAY[item_id], to_jsonb(new_count))
+  WHERE id = player_id;
+  
+  RETURN TRUE;
 END;
 $$;
 
--- Attack Territory (UPDATED WITH DEFENSE BONUS)
+-- Attack Territory
 CREATE OR REPLACE FUNCTION attack_territory(
   attacker_id TEXT,
   source_id TEXT,
@@ -143,18 +143,14 @@ BEGIN
      RETURN jsonb_build_object('success', false, 'message', 'Recursos insuficientes');
   END IF;
 
-  -- Consume Energy & Source Strength immediately
   UPDATE players SET energy = energy - energy_cost WHERE id = attacker_id;
   UPDATE territories SET strength = 1 WHERE id = source_id;
 
-  -- Defense Bonus Calculation (20% bonus for defender)
   defense_bonus := FLOOR(def_strength * 1.2);
 
   IF att_strength > defense_bonus THEN
-     -- Attacker Wins
      UPDATE territories SET strength = (att_strength - defense_bonus), owner_id = attacker_id WHERE id = target_id;
      
-     -- PERMADEATH CHECK
      IF def_owner IS NOT NULL THEN
         SELECT COUNT(*) INTO def_territory_count FROM territories WHERE owner_id = def_owner;
         IF def_territory_count = 0 THEN
@@ -164,15 +160,13 @@ BEGIN
 
      RETURN jsonb_build_object('success', true, 'message', 'Conquistado');
   ELSE
-     -- Defender Wins (Attacker lost troops, Defender takes damage but holds)
-     -- Defender loses troops proportional to attack, but keeps at least 1
      UPDATE territories SET strength = GREATEST(1, def_strength - FLOOR(att_strength * 0.8)) WHERE id = target_id;
      RETURN jsonb_build_object('success', false, 'message', 'Defesa resistiu (+20% Bônus)');
   END IF;
 END;
 $$;
 
--- Passive Growth (ENHANCED: Money & Energy based on Strength/Count)
+-- Passive Growth
 CREATE OR REPLACE FUNCTION passive_territory_growth(player_id TEXT)
 RETURNS VOID
 LANGUAGE plpgsql
@@ -183,32 +177,22 @@ DECLARE
   total_strength INTEGER;
   income_amount NUMERIC;
 BEGIN
-  -- 1. Increase Strength of all owned territories by 1 (up to max 100 passively)
   UPDATE territories 
   SET strength = strength + 1 
   WHERE owner_id = player_id AND strength < 100;
 
-  -- 2. Calculate Stats
   SELECT COUNT(*), COALESCE(SUM(strength), 0) 
   INTO terr_count, total_strength 
   FROM territories 
   WHERE owner_id = player_id;
 
-  -- 3. Apply Resources
   IF terr_count > 0 THEN
-    -- Income: 5 per territory + 10% of total strength
     income_amount := (terr_count * 5) + FLOOR(total_strength * 0.1);
-    
     UPDATE players 
-    SET 
-      money = money + income_amount,
-      energy = LEAST(100, energy + 5)
+    SET money = money + income_amount, energy = LEAST(100, energy + 5)
     WHERE id = player_id;
   ELSE
-    -- Survival Regen (no territories)
-    UPDATE players 
-    SET energy = LEAST(100, energy + 2)
-    WHERE id = player_id;
+    UPDATE players SET energy = LEAST(100, energy + 2) WHERE id = player_id;
   END IF;
 END;
 $$;
@@ -294,7 +278,7 @@ export const TRANSLATIONS = {
     active: 'Online',
     offline: 'Offline',
     transfer: 'Transferir',
-    chat: 'Chat',
+    chat: 'Chat Global',
     shop: 'Loja',
     inventory: 'Mochila',
     logout: 'Sair',
@@ -316,7 +300,7 @@ export const TRANSLATIONS = {
     money: 'Créditos',
     buy: 'COMPRAR',
     use: 'USAR',
-    sendMessage: 'Enviar mensagem...',
+    sendMessage: 'Enviar mensagem para todos...',
     item_recruit: 'Recrutar (+10)',
     item_fortify: 'Fortificar (+20)',
     item_bunker: 'Bunker (+50)',
@@ -338,7 +322,7 @@ export const TRANSLATIONS = {
     active: 'Online',
     offline: 'Offline',
     transfer: 'Transfer',
-    chat: 'Chat',
+    chat: 'Global Chat',
     shop: 'Shop',
     inventory: 'Inventory',
     logout: 'Logout',
@@ -360,7 +344,7 @@ export const TRANSLATIONS = {
     money: 'Credits',
     buy: 'BUY',
     use: 'USE',
-    sendMessage: 'Send message...',
+    sendMessage: 'Send message to all...',
     item_recruit: 'Recruit (+10)',
     item_fortify: 'Fortify (+20)',
     item_bunker: 'Bunker (+50)',
@@ -382,7 +366,7 @@ export const TRANSLATIONS = {
     active: 'En Línea',
     offline: 'Desconectado',
     transfer: 'Transferir',
-    chat: 'Chat',
+    chat: 'Chat Global',
     shop: 'Tienda',
     inventory: 'Inventario',
     logout: 'Salir',

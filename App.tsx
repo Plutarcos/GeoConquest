@@ -58,11 +58,21 @@ const App: React.FC = () => {
   // Initialize DB
   useEffect(() => {
     const init = async () => {
+         // Setup Chat Callback before Init
+         gameService.setChatCallback((msg) => {
+             setChatMessages(prev => {
+                 // Prevent dupes
+                 if (prev.some(p => p.id === msg.id)) return prev;
+                 return [...prev, msg].slice(-50); // Keep last 50
+             });
+             if (!showChat) setHasUnread(true);
+         });
+
          await gameService.initDatabase();
          setIsInitializing(false);
     };
     init();
-  }, []);
+  }, [showChat]); // Re-run if showChat changes is fine, but better to keep ref or simple state
 
   // Check for existing session
   useEffect(() => {
@@ -197,15 +207,9 @@ const App: React.FC = () => {
     }]);
   };
 
-  const addChatMessage = (text: string, sender: string = "System", isSystem: boolean = false) => {
-    setChatMessages(prev => [...prev, {
-      id: Date.now().toString() + Math.random(),
-      sender,
-      text,
-      timestamp: Date.now(),
-      isSystem
-    }]);
-    if (!showChat) setHasUnread(true);
+  const handleSendMessage = async (text: string) => {
+      if (!player) return;
+      await gameService.sendGlobalMessage(player.username, text);
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -221,22 +225,19 @@ const App: React.FC = () => {
       const user = await gameService.login(finalUsername);
       setPlayer(user);
       
-      // FIX: Handle LocalStorage Quota Exceeded gracefully
       try {
         localStorage.setItem('geoconquest_user', JSON.stringify(user));
       } catch (storageError) {
-        console.warn("LocalStorage full. Attempting cleanup...", storageError);
         try {
-            localStorage.clear(); // Clear old data to make space
+            localStorage.clear(); 
             localStorage.setItem('geoconquest_user', JSON.stringify(user));
         } catch (retryError) {
-            console.error("Critical: Storage quota exceeded even after cleanup.", retryError);
             showToast("Warning: Session won't persist (Storage Full)", 'error');
         }
       }
 
       setStatus(GameStatus.SETUP);
-      addChatMessage(`Agent ${user.username} connected.`, "System", true);
+      // No local chat message addition needed, subscription handles it
     } catch (error: any) {
       console.error(error);
       setMessage(`ERROR: ${error.message || "Login failed"}`);
@@ -256,7 +257,7 @@ const App: React.FC = () => {
       await gameService.captureTerritory(player.id, gameState.selectedTerritoryId);
       setStatus(GameStatus.PLAYING);
       showToast(t.startConquest, 'success');
-      addChatMessage("Sector occupation initiated.", "System", true);
+      // No local chat addition needed
     } catch (e) {
       showToast("Error starting game", 'error');
     }
@@ -334,7 +335,6 @@ const App: React.FC = () => {
           if (result.success) {
             addVisualEffect("VICTORY", clickedTerritory.lat, clickedTerritory.lng, 'heal');
             addVisualEffect("-1", source.lat, source.lng, 'info');
-            addChatMessage(`${player.username} conquered ${clickedTerritory.name}!`, "System", true);
             // Auto select conquered
             setGameState(prev => ({ ...prev, selectedTerritoryId: clickedId }));
           } else {
@@ -609,7 +609,7 @@ const App: React.FC = () => {
            language={language}
            isOpen={showChat}
            onClose={() => setShowChat(false)}
-           onSendMessage={(text) => addChatMessage(text, player.username)}
+           onSendMessage={handleSendMessage}
          />
       )}
 

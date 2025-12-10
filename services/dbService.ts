@@ -1,7 +1,7 @@
 
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { GameState, Player, Territory } from '../types';
+import { GameState, Player, Territory, ChatMessage } from '../types';
 import { INITIAL_STRENGTH, INITIAL_MONEY, GRID_SIZE, SUPABASE_URL, SUPABASE_ANON_KEY, ENERGY_COST_ATTACK, ENERGY_MAX, INCOME_PER_TERRITORY } from '../constants';
 
 export class GameService {
@@ -9,6 +9,7 @@ export class GameService {
   private offlineMode: boolean = false;
   private supabase: SupabaseClient | null = null;
   private lastPassiveTick: number = 0;
+  private chatCallback: ((msg: ChatMessage) => void) | null = null;
 
   constructor() {
     this.state = {
@@ -24,7 +25,7 @@ export class GameService {
 
     // Load offline data if exists
     if (localStorage.getItem('geoconquest_offline_data')) {
-       // Local data handling
+       // Local data handling could go here
     }
   }
 
@@ -34,6 +35,10 @@ export class GameService {
     if (!json) return { players: [], territories: [] };
     const data = JSON.parse(json);
     return data;
+  }
+
+  public setChatCallback(cb: (msg: ChatMessage) => void) {
+      this.chatCallback = cb;
   }
 
   // --- Supabase Init ---
@@ -49,11 +54,10 @@ export class GameService {
         }
       });
       
-      // Test connection simply
-      // We don't throw error here if table is missing, we catch it at login
+      // We assume connection is good initially, but failures in login/sync will flip this
       this.state.connected = true;
       this.offlineMode = false;
-      console.log("Supabase Connected.");
+      console.log("Supabase Client Initialized.");
       
       // Subscribe to realtime changes
       this.supabase.channel('game_updates')
@@ -67,10 +71,22 @@ export class GameService {
                this.updateLocalPlayer(payload.new as any);
            }
         })
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+           if (payload.new && this.chatCallback) {
+               const msg = payload.new as any;
+               this.chatCallback({
+                   id: msg.id,
+                   sender: msg.sender,
+                   text: msg.text,
+                   timestamp: new Date(msg.created_at).getTime(),
+                   isSystem: false
+               });
+           }
+        })
         .subscribe();
 
     } catch (e) {
-      console.error("Supabase Connection Failed:", e);
+      console.error("Supabase Initialization Failed:", e);
       this.offlineMode = true;
       this.state.connected = false;
     }
@@ -104,10 +120,20 @@ export class GameService {
     const color = this.getRandomColor();
     const now = Date.now();
 
+    // Helper to create an offline/default player object
+    const createOfflinePlayer = (): Player => ({
+        id, 
+        username, 
+        color, 
+        money: INITIAL_MONEY, 
+        energy: 100, 
+        maxEnergy: 100, 
+        lastSeen: now, 
+        inventory: {}
+    });
+
     if (this.offlineMode || !this.supabase) {
-        return {
-            id, username, color, money: INITIAL_MONEY, energy: 100, maxEnergy: 100, lastSeen: now, inventory: {}
-        };
+        return createOfflinePlayer();
     }
 
     try {
@@ -120,9 +146,11 @@ export class GameService {
 
         // PGRST116 means "No rows found" (User doesn't exist yet)
         if (error && error.code !== 'PGRST116') {
-            console.error("Fetch Error:", error);
             // Allow 406 to pass through as not found in some Supabase versions
-            if (error.code !== '406') throw error;
+            if (error.code !== '406') {
+                console.error("Fetch Error:", error);
+                throw error; // Throwing here triggers catch block to switch to offline
+            }
         }
 
         // 2. If not found, CREATE the user
@@ -161,17 +189,24 @@ export class GameService {
             inventory: data.inventory || {}
         };
     } catch (e: any) {
-        console.error("Login Fatal Error:", e);
-        throw new Error(e.message || "Login failed (Connection error)");
+        console.warn("Connection failed during login. Switching to Offline Mode.", e);
+        this.offlineMode = true;
+        this.state.connected = false;
+        return createOfflinePlayer();
     }
   }
 
   public async getUserTerritoryCount(playerId: string): Promise<number> {
-      if (!this.supabase) return 0;
-      const { count } = await this.supabase.from('territories')
-        .select('*', { count: 'exact', head: true })
-        .eq('owner_id', playerId);
-      return count || 0;
+      if (!this.supabase || this.offlineMode) return 0;
+      try {
+        const { count, error } = await this.supabase.from('territories')
+            .select('*', { count: 'exact', head: true })
+            .eq('owner_id', playerId);
+        if (error) throw error;
+        return count || 0;
+      } catch (e) {
+        return 0; // Fail gracefully
+      }
   }
 
   public async syncState(currentPlayerId: string | null): Promise<GameState> {
@@ -179,50 +214,61 @@ export class GameService {
         return { ...this.state, connected: false };
     }
 
-    // Process Passive Growth (Server RPC Trigger)
-    const now = Date.now();
-    if (now - this.lastPassiveTick > 10000 && currentPlayerId) {
-        this.processPassiveGrowth(currentPlayerId);
-        this.lastPassiveTick = now;
-    }
+    try {
+        // Process Passive Growth (Server RPC Trigger)
+        const now = Date.now();
+        if (now - this.lastPassiveTick > 10000 && currentPlayerId) {
+            this.processPassiveGrowth(currentPlayerId);
+            this.lastPassiveTick = now;
+        }
 
-    // Fetch Players
-    const { data: playersData } = await this.supabase.from('players').select('*');
-    const playersMap: Record<string, Player> = {};
-    if (playersData) {
-        playersData.forEach((p: any) => {
-            playersMap[p.id] = {
-                id: p.id,
-                username: p.username,
-                color: p.color,
-                money: Number(p.money),
-                energy: Number(p.energy),
-                maxEnergy: 100,
-                lastSeen: p.last_seen,
-                inventory: p.inventory || {}
-            };
-        });
-    }
+        // Fetch Players
+        const { data: playersData, error: playersError } = await this.supabase.from('players').select('*');
+        if (playersError) throw playersError;
 
-    // Fetch Territories in view (simplified to all for now)
-    const { data: terrData } = await this.supabase.from('territories').select('*');
-    const terrMap: Record<string, Territory> = {};
-    if (terrData) {
-        terrData.forEach((t: any) => {
-            terrMap[t.id] = {
-                id: t.id,
-                name: t.name,
-                ownerId: t.owner_id,
-                strength: t.strength,
-                lat: t.lat,
-                lng: t.lng
-            };
-        });
-    }
+        const playersMap: Record<string, Player> = {};
+        if (playersData) {
+            playersData.forEach((p: any) => {
+                playersMap[p.id] = {
+                    id: p.id,
+                    username: p.username,
+                    color: p.color,
+                    money: Number(p.money),
+                    energy: Number(p.energy),
+                    maxEnergy: 100,
+                    lastSeen: p.last_seen,
+                    inventory: p.inventory || {}
+                };
+            });
+        }
 
-    this.state.players = playersMap;
-    this.state.territories = terrMap;
-    this.state.connected = true;
+        // Fetch Territories in view (simplified to all for now)
+        const { data: terrData, error: terrError } = await this.supabase.from('territories').select('*');
+        if (terrError) throw terrError;
+
+        const terrMap: Record<string, Territory> = {};
+        if (terrData) {
+            terrData.forEach((t: any) => {
+                terrMap[t.id] = {
+                    id: t.id,
+                    name: t.name,
+                    ownerId: t.owner_id,
+                    strength: t.strength,
+                    lat: t.lat,
+                    lng: t.lng
+                };
+            });
+        }
+
+        this.state.players = playersMap;
+        this.state.territories = terrMap;
+        this.state.connected = true;
+
+    } catch (e) {
+        console.warn("Sync failed, entering offline mode", e);
+        this.offlineMode = true;
+        this.state.connected = false;
+    }
 
     return { ...this.state };
   }
@@ -254,34 +300,67 @@ export class GameService {
 
     // Batch Fetch
     if (!this.offlineMode && this.supabase && idsToFetch.length > 0) {
-        // Only try to fetch if we have items
-        const { data } = await this.supabase.from('territories').select('*').in('id', idsToFetch);
-        const existingIds = new Set((data || []).map((t: any) => t.id));
+        try {
+            // Only try to fetch if we have items
+            const { data, error } = await this.supabase.from('territories').select('*').in('id', idsToFetch);
+            
+            if (error) throw error;
 
-        // Create missing
-        const newTerritories = gridPoints.filter(p => !existingIds.has(p.id)).map(p => ({
-            id: p.id,
-            name: p.name,
-            lat: p.lat,
-            lng: p.lng,
-            strength: Math.floor(Math.random() * 20) + 5,
-            owner_id: null
-        }));
+            const existingIds = new Set((data || []).map((t: any) => t.id));
 
-        if (newTerritories.length > 0) {
-            await this.supabase.from('territories').insert(newTerritories);
+            // Create missing
+            const newTerritories = gridPoints.filter(p => !existingIds.has(p.id)).map(p => ({
+                id: p.id,
+                name: p.name,
+                lat: p.lat,
+                lng: p.lng,
+                strength: Math.floor(Math.random() * 20) + 5,
+                owner_id: null
+            }));
+
+            if (newTerritories.length > 0) {
+                const { error: insertError } = await this.supabase.from('territories').insert(newTerritories);
+                if (insertError) console.warn("Grid gen insert error:", insertError);
+            }
+        } catch (e) {
+            console.warn("Grid initialization failed (Network)", e);
+            // Fallback: Generate local territories only in memory so the map isn't empty
+            gridPoints.forEach(p => {
+                if (!this.state.territories[p.id]) {
+                     this.state.territories[p.id] = {
+                        id: p.id,
+                        name: p.name,
+                        lat: p.lat,
+                        lng: p.lng,
+                        strength: 5,
+                        ownerId: null
+                     };
+                }
+            });
         }
+    } else if (this.offlineMode) {
+         // Generate in memory for offline
+         gridPoints.forEach(p => {
+            if (!this.state.territories[p.id]) {
+                    this.state.territories[p.id] = {
+                    id: p.id,
+                    name: p.name,
+                    lat: p.lat,
+                    lng: p.lng,
+                    strength: 5,
+                    ownerId: null
+                    };
+            }
+        });
     }
   }
 
   private async processPassiveGrowth(playerId: string) {
-     if(!this.supabase) return;
-     // Invoke the Supabase RPC function that handles logic securely
-     // We don't await this strictly to avoid blocking UI
+     if(!this.supabase || this.offlineMode) return;
      try {
          await this.supabase.rpc('passive_territory_growth', { player_id: playerId });
      } catch (error) {
-         // Silently fail or log if needed
+         // Silently fail
      }
   }
 
@@ -296,13 +375,24 @@ export class GameService {
   }
 
   public async captureTerritory(playerId: string, territoryId: string) {
-    if (!this.offlineMode && this.supabase) {
+    if (this.offlineMode || !this.supabase) {
+        // Offline simulation
+        if (this.state.territories[territoryId]) {
+            this.state.territories[territoryId].ownerId = playerId;
+            this.state.territories[territoryId].strength = INITIAL_STRENGTH;
+        }
+        return;
+    }
+
+    try {
         await this.supabase.from('territories')
             .update({ owner_id: playerId, strength: INITIAL_STRENGTH })
             .eq('id', territoryId);
         
         const t = this.state.territories[territoryId];
         if (t) await this.generateNeighbors(t.lat, t.lng);
+    } catch (e) {
+        console.error("Capture failed:", e);
     }
   }
 
@@ -311,7 +401,6 @@ export class GameService {
      for (const [ox, oy] of offsets) {
         const nLat = lat + (ox * GRID_SIZE);
         const nLng = lng + (oy * GRID_SIZE);
-        // Reuse batch logic via initLocalGrid but scoped to small radius
         await this.initLocalGrid(nLat, nLng); 
      }
   }
@@ -324,30 +413,44 @@ export class GameService {
   }
 
   public async attackTerritory(attackerId: string, sourceId: string, targetId: string): Promise<{success: boolean, message: string}> {
-    if (this.offlineMode || !this.supabase) return { success: false, message: "Offline" };
+    if (this.offlineMode || !this.supabase) {
+        // Simple offline logic
+        const target = this.state.territories[targetId];
+        if (target) {
+            target.ownerId = attackerId;
+            target.strength = 10;
+            return { success: true, message: "Conquistado (Offline)" };
+        }
+        return { success: false, message: "Erro offline" };
+    }
 
-    const { data, error } = await this.supabase.rpc('attack_territory', {
-        attacker_id: attackerId,
-        source_id: sourceId,
-        target_id: targetId,
-        energy_cost: ENERGY_COST_ATTACK
-    });
+    try {
+        const { data, error } = await this.supabase.rpc('attack_territory', {
+            attacker_id: attackerId,
+            source_id: sourceId,
+            target_id: targetId,
+            energy_cost: ENERGY_COST_ATTACK
+        });
 
-    if (error) {
-        console.error("Attack error:", error);
+        if (error) throw error;
+        return data;
+    } catch (e) {
+        console.error("Attack error:", e);
         return { success: false, message: "Erro no ataque" };
     }
-    return data;
   }
 
   // --- Inventory & Items ---
 
   public async purchaseItem(playerId: string, itemId: string, cost: number): Promise<{success: boolean, message: string}> {
-      if (!this.supabase) return { success: false, message: "Offline" };
+      // 1. Check Offline
+      if (this.offlineMode || !this.supabase) {
+           return this.offlinePurchase(playerId, itemId, cost);
+      }
       
       let rpcFailed = false;
 
-      // 1. Try RPC (Secure Server-side)
+      // 2. Try RPC (Secure Server-side)
       try {
           const { data, error } = await this.supabase.rpc('purchase_item', {
               player_id: playerId,
@@ -356,10 +459,9 @@ export class GameService {
           });
 
           if (error) {
-              console.warn("RPC Failed (Database function error). Attempting Client-Side Fallback...", error.message);
+              console.warn("RPC Failed. Attempting Client-Side Fallback...", error);
               rpcFailed = true;
           } else {
-              // RPC executed successfully
               if (data === false) return { success: false, message: "Fundos insuficientes" };
               return { success: true, message: "Comprado" };
           }
@@ -368,10 +470,10 @@ export class GameService {
           rpcFailed = true;
       }
 
-      // 2. Fallback: Client-side Transaction (Robustness for broken/missing SQL functions)
+      // 3. Fallback: Client-side Transaction
       if (rpcFailed) {
          try {
-             // A. Fetch current state manually
+             // Fetch current state
              const { data: player, error: fetchError } = await this.supabase
                  .from('players')
                  .select('money, inventory')
@@ -385,66 +487,96 @@ export class GameService {
 
              const inventory = player.inventory || {};
              const currentCount = (inventory[itemId] || 0);
-             
-             // B. Calculate new state
+             const newInventory = { ...inventory, [itemId]: currentCount + 1 };
+
              const updates = {
                  money: currentMoney - cost,
-                 inventory: {
-                     ...inventory,
-                     [itemId]: currentCount + 1
-                 }
+                 inventory: newInventory
              };
 
-             // C. Update manually
              const { error: updateError } = await this.supabase
                  .from('players')
                  .update(updates)
                  .eq('id', playerId);
 
-             if (updateError) {
-                 console.error("Fallback update error:", updateError);
-                 return { success: false, message: "Erro ao processar compra" };
-             }
+             if (updateError) throw updateError;
              
-             return { success: true, message: "Comprado" };
+             return { success: true, message: "Comprado (Fallback)" };
 
          } catch (e) {
              console.error("Critical Purchase Failure:", e);
-             return { success: false, message: "Erro fatal na compra" };
+             return { success: false, message: "Erro de conexão" };
          }
       }
 
       return { success: false, message: "Erro desconhecido" };
   }
 
+  private offlinePurchase(playerId: string, itemId: string, cost: number): {success: boolean, message: string} {
+      const p = this.state.players[playerId];
+      if (!p) return { success: false, message: "Erro player" };
+      if (p.money < cost) return { success: false, message: "Fundos insuficientes" };
+      
+      p.money -= cost;
+      p.inventory[itemId] = (p.inventory[itemId] || 0) + 1;
+      return { success: true, message: "Comprado (Offline)" };
+  }
+
   public async useItem(playerId: string, itemId: string, targetTerritoryId?: string): Promise<{success: boolean, message: string}> {
-      if (!this.supabase) return { success: false, message: "Offline" };
+      if (this.offlineMode || !this.supabase) {
+          const p = this.state.players[playerId];
+          if (p && p.inventory[itemId] > 0) {
+              p.inventory[itemId]--;
+              // Apply simple effects offline
+              if (itemId === 'stimpack') p.energy = Math.min(p.energy + 50, 100);
+              if (targetTerritoryId && this.state.territories[targetTerritoryId]) {
+                   this.state.territories[targetTerritoryId].strength += 10;
+              }
+              return { success: true, message: "Item usado (Offline)" };
+          }
+          return { success: false, message: "Sem item" };
+      }
 
-      const { data, error } = await this.supabase.rpc('use_item', {
-          player_id: playerId,
-          item_id: itemId,
-          target_territory_id: targetTerritoryId || null
-      });
+      try {
+        const { data, error } = await this.supabase.rpc('use_item', {
+            player_id: playerId,
+            item_id: itemId,
+            target_territory_id: targetTerritoryId || null
+        });
 
-      if (error) {
-          console.error("Use Item Error:", error);
+        if (error) throw error;
+        return data;
+      } catch (e) {
+          console.error("Use Item Error:", e);
           return { success: false, message: "Erro ao usar item" };
       }
-      return data;
   }
 
   public async transferTroops(playerId: string, sourceId: string, targetId: string, amount: number): Promise<{success: boolean, message: string}> {
-      if (!this.supabase) return { success: false, message: "Offline" };
+      if (this.offlineMode || !this.supabase) return { success: true, message: "Transferido (Offline)" };
 
-      const { data, error } = await this.supabase.rpc('transfer_strength', {
-          player_id: playerId,
-          source_id: sourceId,
-          target_id: targetId,
-          amount: amount
-      });
-      
-      if (error || !data) return { success: false, message: "Falha na transferência" };
-      return { success: true, message: "Tropas transferidas" };
+      try {
+        const { data, error } = await this.supabase.rpc('transfer_strength', {
+            player_id: playerId,
+            source_id: sourceId,
+            target_id: targetId,
+            amount: amount
+        });
+        
+        if (error || !data) return { success: false, message: "Falha na transferência" };
+        return { success: true, message: "Tropas transferidas" };
+      } catch (e) {
+          return { success: false, message: "Erro de conexão" };
+      }
+  }
+
+  public async sendGlobalMessage(sender: string, text: string) {
+      if (this.offlineMode || !this.supabase) return;
+      try {
+          await this.supabase.from('messages').insert([{ sender, text }]);
+      } catch (e) {
+          console.error("Chat Error", e);
+      }
   }
 
   public getLatestState(): GameState {
