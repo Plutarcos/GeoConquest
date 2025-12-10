@@ -68,8 +68,12 @@ const App: React.FC = () => {
   useEffect(() => {
     const savedUser = localStorage.getItem('geoconquest_user');
     if (savedUser) {
-      const p = JSON.parse(savedUser);
-      setUsername(p.username);
+      try {
+        const p = JSON.parse(savedUser);
+        setUsername(p.username);
+      } catch (e) {
+        // Invalid JSON, ignore
+      }
     }
   }, []);
 
@@ -216,7 +220,21 @@ const App: React.FC = () => {
     try {
       const user = await gameService.login(finalUsername);
       setPlayer(user);
-      localStorage.setItem('geoconquest_user', JSON.stringify(user));
+      
+      // FIX: Handle LocalStorage Quota Exceeded gracefully
+      try {
+        localStorage.setItem('geoconquest_user', JSON.stringify(user));
+      } catch (storageError) {
+        console.warn("LocalStorage full. Attempting cleanup...", storageError);
+        try {
+            localStorage.clear(); // Clear old data to make space
+            localStorage.setItem('geoconquest_user', JSON.stringify(user));
+        } catch (retryError) {
+            console.error("Critical: Storage quota exceeded even after cleanup.", retryError);
+            showToast("Warning: Session won't persist (Storage Full)", 'error');
+        }
+      }
+
       setStatus(GameStatus.SETUP);
       addChatMessage(`Agent ${user.username} connected.`, "System", true);
     } catch (error: any) {

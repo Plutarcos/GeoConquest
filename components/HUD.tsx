@@ -107,7 +107,7 @@ const HUD: React.FC<HUDProps> = ({
                 <span className="font-mono font-bold text-xl">${Math.floor(player.money)}</span>
              </div>
              {projectedIncome > 0 && (
-                 <div className="flex items-center gap-1 text-[10px] text-green-400 font-mono mt-1 pr-2">
+                 <div className="flex items-center gap-1 text-[10px] text-green-400 font-mono mt-1 pr-2 animate-pulse">
                      <TrendingUp size={10} /> +${projectedIncome}/10s
                  </div>
              )}
