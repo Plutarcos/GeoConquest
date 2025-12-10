@@ -1,4 +1,5 @@
 
+
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { GameState, Player, Territory } from '../types';
 import { INITIAL_STRENGTH, INITIAL_MONEY, GRID_SIZE, SUPABASE_URL, SUPABASE_ANON_KEY, ENERGY_COST_ATTACK, ENERGY_MAX, INCOME_PER_TERRITORY } from '../constants';
@@ -103,7 +104,7 @@ export class GameService {
 
   // --- Game Logic ---
 
-  public async login(username: string, password?: string): Promise<Player> {
+  public async login(username: string): Promise<Player> {
     const id = `user_${username.replace(/\s+/g, '_').toLowerCase()}`;
     const color = this.getRandomColor();
     const now = Date.now();
@@ -122,15 +123,14 @@ export class GameService {
             username, 
             color, 
             last_seen: now,
-            inventory: {},
-            ...(password ? { password } : {})
+            inventory: {}
         }, { onConflict: 'id', ignoreDuplicates: false })
         .select()
         .single();
 
     if (error || !data) {
         console.error("Login Error", error);
-        throw new Error("Login failed (Check password or connection)");
+        throw new Error("Login failed (Connection error)");
     }
 
     // Ensure defaults if new

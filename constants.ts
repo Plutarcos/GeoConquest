@@ -1,4 +1,5 @@
 
+
 // Leaflet Tile Layer (Dark Matter)
 export const MAP_TILE_URL = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
 export const MAP_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
@@ -197,7 +198,6 @@ export const TRANSLATIONS = {
     sendMessage: "Enviar mensagem...",
     newMsg: "Nova Msg",
     permadeathWarn: "Atenção: Se perder todos os territórios, sua conta será deletada.",
-    passwordOpt: "Senha (Opcional)",
     guestLogin: "Entrar como Convidado",
     error_occupied: "Setor Ocupado! Escolha outro para iniciar.",
     error_adjacent: "Alvo muito distante! Deve ser adjacente.",
@@ -239,7 +239,6 @@ export const TRANSLATIONS = {
     sendMessage: "Send message...",
     newMsg: "New Msg",
     permadeathWarn: "Warning: If you lose all territories, account is deleted.",
-    passwordOpt: "Password (Optional)",
     guestLogin: "Login as Guest",
     error_occupied: "Sector Occupied! Choose another to start.",
     error_adjacent: "Target too far! Must be adjacent.",
@@ -281,7 +280,6 @@ export const TRANSLATIONS = {
     sendMessage: "Enviar mensaje...",
     newMsg: "Nuevo",
     permadeathWarn: "Aviso: Si pierdes todo, se borra la cuenta.",
-    passwordOpt: "Contraseña (Opcional)",
     guestLogin: "Entrar como Invitado",
     error_occupied: "Sector Ocupado! Elige otro.",
     error_adjacent: "Objetivo lejano. Debe ser adyacente.",
@@ -323,7 +321,6 @@ export const TRANSLATIONS = {
     sendMessage: "Nachricht senden...",
     newMsg: "Neu",
     permadeathWarn: "Warnung: Bei totalem Verlust wird das Konto gelöscht.",
-    passwordOpt: "Passwort (Optional)",
     guestLogin: "Als Gast",
     error_occupied: "Sektor besetzt! Wähle einen anderen.",
     error_adjacent: "Zu weit! Muss benachbart sein.",
@@ -365,7 +362,6 @@ export const TRANSLATIONS = {
     sendMessage: "发送消息...",
     newMsg: "新消息",
     permadeathWarn: "警告：如果失去所有领土，账户将被删除。",
-    passwordOpt: "密码 (可选)",
     guestLogin: "游客登录",
     error_occupied: "区域已被占领！请选择其他区域。",
     error_adjacent: "目标太远！必须相邻。",

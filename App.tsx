@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useRef } from 'react';
 import { GameStatus, Player, GameState, Language, ShopItem, VisualEffect, ChatMessage } from './types';
 import { getUserLocation } from './services/geoService';
@@ -15,7 +16,6 @@ import { TRANSLATIONS } from './constants';
 const App: React.FC = () => {
   const [status, setStatus] = useState<GameStatus>(GameStatus.LOGIN);
   const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
   const [player, setPlayer] = useState<Player | null>(null);
   const [language, setLanguage] = useState<Language>('pt-BR');
   const [isInitializing, setIsInitializing] = useState(true);
@@ -214,11 +214,9 @@ const App: React.FC = () => {
     }
 
     try {
-      const user = await gameService.login(finalUsername, password);
+      const user = await gameService.login(finalUsername);
       setPlayer(user);
-      if (password) {
-        localStorage.setItem('geoconquest_user', JSON.stringify(user));
-      }
+      localStorage.setItem('geoconquest_user', JSON.stringify(user));
       setStatus(GameStatus.SETUP);
       addChatMessage(`Agent ${user.username} connected.`, "System", true);
     } catch (error: any) {
@@ -475,14 +473,6 @@ const App: React.FC = () => {
                   className="w-full bg-black/50 border border-gray-700 rounded-lg p-3 text-white focus:border-neon-blue focus:outline-none focus:shadow-[0_0_15px_rgba(0,243,255,0.3)] transition font-mono mb-2"
                   placeholder="CODENAME (Optional for Guest)"
                   maxLength={12}
-                />
-                 <label className="block text-xs uppercase tracking-wider text-gray-500 mb-1">{t.passwordOpt}</label>
-                <input 
-                  type="password" 
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  className="w-full bg-black/50 border border-gray-700 rounded-lg p-3 text-white focus:border-neon-blue focus:outline-none focus:shadow-[0_0_15px_rgba(0,243,255,0.3)] transition font-mono"
-                  placeholder="********"
                 />
               </div>
               
