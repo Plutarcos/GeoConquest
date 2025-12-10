@@ -277,6 +277,7 @@ BEGIN
   RETURN TRUE;
 END;
 $$;
+`;
 
 export const TRANSLATIONS = {
   'pt-BR': {
