@@ -62,6 +62,18 @@ const MapController = ({
   return null;
 };
 
+// SVG Icons for different tiers
+const ICONS = {
+  // Simple Dot
+  OUTPOST: `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="8"/></svg>`,
+  // Shield
+  FORT: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
+  // Castle/Rook
+  BASE: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10c0-1.1.9-2 2-2h12a2 2 0 0 1 2 2v10H4V10z"/><path d="M8 2v6"/><path d="M16 2v6"/><path d="M12 2v6"/></svg>`,
+  // Target Reticle
+  RETICLE: `<svg width="60" height="60" viewBox="0 0 100 100" class="selection-ring"><circle cx="50" cy="50" r="45" stroke="white" stroke-width="2" fill="none" stroke-dasharray="10 5" opacity="0.8"/><circle cx="50" cy="50" r="35" stroke="#00f3ff" stroke-width="1" fill="none" opacity="0.5"/><line x1="50" y1="5" x2="50" y2="20" stroke="white" stroke-width="2"/><line x1="50" y1="95" x2="50" y2="80" stroke="white" stroke-width="2"/><line x1="5" y1="50" x2="20" y2="50" stroke="white" stroke-width="2"/><line x1="95" y1="50" x2="80" y2="50" stroke="white" stroke-width="2"/></svg>`
+};
+
 const MapComponent: React.FC<MapProps> = ({ 
   centerLat,
   centerLng,
@@ -108,64 +120,98 @@ const MapComponent: React.FC<MapProps> = ({
            ];
 
            let fillColor = COLORS.NEUTRAL;
-           let fillOpacity = 0.3;
+           let fillOpacity = 0.2;
            let strokeColor = COLORS.STROKE;
            let weight = 1;
            let ownerName = "Neutro";
+           let textColor = '#94a3b8'; // gray-400
 
+           // State determination
+           const isOwner = t.ownerId === currentPlayerId;
+           const isSelected = selectedTerritoryId === t.id;
+           
            if (t.ownerId) {
-             fillOpacity = 0.5;
+             fillOpacity = 0.4;
              const owner = players[t.ownerId];
              if (owner) {
                 ownerName = owner.username;
-                if (t.ownerId === currentPlayerId) {
-                    fillColor = COLORS.PLAYER;
-                } else {
-                    fillColor = owner.color;
-                }
+                fillColor = isOwner ? COLORS.PLAYER : owner.color;
+                textColor = isOwner ? '#0aff00' : owner.color;
              } else {
                  ownerName = "Desconhecido";
                  fillColor = COLORS.ENEMY;
+                 textColor = COLORS.ENEMY;
              }
            }
 
-           const isSelected = selectedTerritoryId === t.id;
+           // Tier Logic
+           let TierIcon = ICONS.OUTPOST;
+           if (t.strength >= 20 && t.strength < 50) TierIcon = ICONS.FORT;
+           if (t.strength >= 50) TierIcon = ICONS.BASE;
+
            if (isSelected) {
               strokeColor = '#ffffff';
-              weight = 3;
-              fillOpacity = 0.7;
+              weight = 2;
+              fillOpacity = 0.6;
            }
 
            return (
-             <Rectangle
-               key={t.id}
-               bounds={bounds as any}
-               pathOptions={{ 
-                 color: strokeColor, 
-                 weight, 
-                 fillColor, 
-                 fillOpacity,
-                 className: isSelected ? 'animate-pulse-slow' : '' 
-               }}
-               eventHandlers={{
-                 click: () => onTerritoryClick(t.id),
-               }}
-             >
-               <Tooltip 
-                  direction="center" 
-                  permanent 
-                  className={`bg-transparent border-none text-white font-bold shadow-none text-center ${isSelected ? 'text-lg' : 'text-xs'}`}
+             <React.Fragment key={t.id}>
+               {/* 1. The Base Rectangle */}
+               <Rectangle
+                 bounds={bounds as any}
+                 pathOptions={{ 
+                   color: strokeColor, 
+                   weight, 
+                   fillColor, 
+                   fillOpacity,
+                   className: 'territory-poly' 
+                 }}
+                 eventHandlers={{
+                   click: () => onTerritoryClick(t.id),
+                 }}
+               />
+
+               {/* 2. The Center Icon (Strength & Tier) */}
+               <Marker
+                 position={[t.lat, t.lng]}
+                 eventHandlers={{ click: () => onTerritoryClick(t.id) }}
+                 icon={L.divIcon({
+                    className: 'floating-text-icon',
+                    html: `<div class="tier-icon" style="color: ${textColor}">
+                             ${TierIcon}
+                             <span style="position: absolute; bottom: -12px; font-size: 9px; font-weight: bold; background: rgba(0,0,0,0.6); padding: 0 3px; border-radius: 4px; border: 1px solid ${strokeColor};">${t.strength}</span>
+                           </div>`,
+                    iconSize: [30, 30],
+                    iconAnchor: [15, 15]
+                 })}
                >
-                 <div className="drop-shadow-md" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.8)' }}>
-                   <div>{t.strength}</div>
-                   {t.ownerId && (
-                     <div className="text-[8px] uppercase tracking-wider mt-1 bg-black/50 px-1 rounded truncate max-w-[60px] mx-auto">
-                        {ownerName}
+                  <Tooltip 
+                    direction="top" 
+                    offset={[0, -10]}
+                    opacity={0.9}
+                    className="bg-panel-bg border border-gray-600 text-white font-mono text-xs z-[1000]"
+                  >
+                     <div className="text-center">
+                        <div className="font-bold text-neon-blue">{t.name}</div>
+                        <div className="text-[10px] text-gray-400">{ownerName}</div>
                      </div>
-                   )}
-                 </div>
-               </Tooltip>
-             </Rectangle>
+                  </Tooltip>
+               </Marker>
+
+               {/* 3. Selection Reticle (Overlay) */}
+               {isSelected && (
+                 <Marker
+                    position={[t.lat, t.lng]}
+                    icon={L.divIcon({
+                        className: 'selection-reticle',
+                        html: ICONS.RETICLE,
+                        iconSize: [60, 60],
+                        iconAnchor: [30, 30]
+                    })}
+                 />
+               )}
+             </React.Fragment>
            );
         })}
 

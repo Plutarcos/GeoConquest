@@ -2,6 +2,8 @@
 
 
 
+
+
 // Leaflet Tile Layer (Dark Matter)
 export const MAP_TILE_URL = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
 export const MAP_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
@@ -19,7 +21,7 @@ export const COLORS = {
   SELECTED: "#ffffff",
   HOVER: "rgba(255, 255, 255, 0.4)",
   WATER: "#050510",
-  STROKE: "#0f172a"
+  STROKE: "rgba(255,255,255,0.1)" // More subtle stroke to let the glow handle borders
 };
 
 export const INITIAL_STRENGTH = 10;
@@ -27,6 +29,9 @@ export const INITIAL_MONEY = 100;
 export const INCOME_PER_TERRITORY = 5;
 export const GROWTH_RATE_MS = 2000; 
 export const MAX_STRENGTH = 5000;
+export const ENERGY_MAX = 100;
+export const ENERGY_REGEN = 2; // Per tick
+export const ENERGY_COST_ATTACK = 20;
 
 // SQLite Cloud SDK Configuration
 const DB_HOST = "cahitlmmvk.g1.sqlite.cloud";
@@ -53,6 +58,7 @@ export const SQL_INIT_TABLES = [
     username TEXT, 
     color TEXT, 
     money REAL, 
+    energy REAL DEFAULT 100,
     last_seen INTEGER
   );`,
   `CREATE TABLE IF NOT EXISTS territories (
