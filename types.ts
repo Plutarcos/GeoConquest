@@ -1,9 +1,10 @@
-
 export interface Player {
   id: string;
   username: string;
   color: string;
   money: number;
+  energy: number;
+  maxEnergy: number;
   lastSeen?: number; // Timestamp for online status
 }
 
@@ -24,7 +25,7 @@ export interface GameState {
   lastUpdate: number;
   centerLat: number;
   centerLng: number;
-  connected: boolean; // Connection status to Cloud DB
+  connected: boolean; // Connection status
 }
 
 export interface GeoLocation {
@@ -65,18 +66,4 @@ export interface ChatMessage {
   text: string;
   timestamp: number;
   isSystem?: boolean;
-}
-
-export interface SqliteCloudResponse {
-  data: any[];
-  columns?: string[];
-  status: string;
-}
-
-declare global {
-  interface Window {
-    sqlitecloud: {
-      Database: any;
-    };
-  }
 }

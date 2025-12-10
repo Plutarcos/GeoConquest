@@ -1,9 +1,3 @@
-
-
-
-
-
-
 // Leaflet Tile Layer (Dark Matter)
 export const MAP_TILE_URL = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
 export const MAP_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
@@ -33,43 +27,9 @@ export const ENERGY_MAX = 100;
 export const ENERGY_REGEN = 2; // Per tick
 export const ENERGY_COST_ATTACK = 20;
 
-// SQLite Cloud SDK Configuration
-const DB_HOST = "cahitlmmvk.g1.sqlite.cloud";
-const DB_PORT = "8860";
-const DB_USER = "admin";
-const DB_PASS = "Labubu123@";
-const DB_NAME = "geoconquest.sqlite";
-const API_KEY = "t4RhYseJkrslILKbJELwkbeOiLEDIPJRByyRLRavpaU";
-
-// Connection String for System Operations (Connecting to default 'sqlitecloud' db to create new dbs)
-// URL Encoding password just in case
-const ENCODED_PASS = encodeURIComponent(DB_PASS);
-
-export const SYSTEM_CONN_STRING = `sqlitecloud://${DB_USER}:${ENCODED_PASS}@${DB_HOST}:${DB_PORT}/sqlitecloud?apikey=${API_KEY}`;
-export const GAME_CONN_STRING = `sqlitecloud://${DB_USER}:${ENCODED_PASS}@${DB_HOST}:${DB_PORT}/${DB_NAME}?apikey=${API_KEY}`;
-
-export const DB_DATABASE_NAME = DB_NAME;
-
-export const SQL_INIT_DB = `CREATE DATABASE IF NOT EXISTS ${DB_NAME};`;
-
-export const SQL_INIT_TABLES = [
-  `CREATE TABLE IF NOT EXISTS players (
-    id TEXT PRIMARY KEY, 
-    username TEXT, 
-    color TEXT, 
-    money REAL, 
-    energy REAL DEFAULT 100,
-    last_seen INTEGER
-  );`,
-  `CREATE TABLE IF NOT EXISTS territories (
-    id TEXT PRIMARY KEY, 
-    owner_id TEXT, 
-    strength INTEGER, 
-    lat REAL, 
-    lng REAL,
-    name TEXT
-  );`
-];
+// Supabase Configuration
+export const SUPABASE_URL = "https://jushyrehjgudedaavzcg.supabase.co";
+export const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp1c2h5cmVoamd1ZGVkYWF2emNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUzMjYyODIsImV4cCI6MjA4MDkwMjI4Mn0.UIbSeC_hzydRHI5I-3rANjUj_MU1k9CDyE3opcEdxM8";
 
 export const SHOP_ITEMS = [
   { id: 'recruit', cost: 50, nameKey: 'recruit_troops', effect: 'strength_10', icon: 'UserPlus' },

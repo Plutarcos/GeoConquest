@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { GameStatus, Player, GameState, Language, ShopItem, VisualEffect, ChatMessage } from './types';
 import { getUserLocation } from './services/geoService';
@@ -51,22 +50,8 @@ const App: React.FC = () => {
   // Initialize DB
   useEffect(() => {
     const init = async () => {
-       try {
          await gameService.initDatabase();
-         const state = gameService.getLatestState();
-         setGameState(prev => ({...prev, connected: state.connected}));
-         
-         if(state.connected) {
-             showToast("Online: Multiplayer Active", 'success');
-         } else {
-             showToast("Offline: Local Mode Active", 'info');
-         }
-       } catch (e) {
-         console.error("DB Init critical fail", e);
-         showToast("Connection Failed - Local Mode", 'error');
-       } finally {
          setIsInitializing(false);
-       }
     };
     init();
   }, []);
@@ -89,14 +74,17 @@ const App: React.FC = () => {
           if (player && syncedState.players[player.id]) {
             setPlayer(prevP => {
                 if (!prevP) return null;
-                return { ...prevP, money: syncedState.players[player.id].money };
+                return { 
+                    ...prevP, 
+                    money: syncedState.players[player.id].money,
+                    energy: syncedState.players[player.id].energy
+                };
             });
           }
           return {
             ...syncedState,
             currentPlayerId: prev.currentPlayerId,
             selectedTerritoryId: prev.selectedTerritoryId,
-            // Don't override center if user is dragging, unless recentered
             centerLat: prev.centerLat,
             centerLng: prev.centerLng
           };
@@ -114,12 +102,8 @@ const App: React.FC = () => {
         .then(async (loc) => {
            userRealLocation.current = { lat: loc.lat, lng: loc.lng };
            
-           // Gera grid local
            await gameService.initLocalGrid(loc.lat, loc.lng);
-           
-           // Força sincronização imediata
            const latestState = await gameService.syncState(player?.id || null);
-           
            const myTerritoryId = gameService.getGridId(loc.lat, loc.lng);
            
            setGameState(prev => ({ 
@@ -185,7 +169,7 @@ const App: React.FC = () => {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username) return;
-    if (isInitializing) return; // Guard
+    if (isInitializing) return;
 
     try {
       const user = await gameService.login(username);
@@ -238,11 +222,11 @@ const App: React.FC = () => {
             addVisualEffect("-1", source.lat, source.lng, 'info');
             addChatMessage(`${player.username} conquered ${clickedTerritory.name}!`, "System", true);
           } else {
-            if (result.message.includes("failed")) {
+            if (result.message && result.message.includes("failed")) {
                addVisualEffect("DEFENDED", clickedTerritory.lat, clickedTerritory.lng, 'damage');
                addVisualEffect("-1", source.lat, source.lng, 'damage');
             } else {
-               showToast(result.message, 'error');
+               showToast(result.message || "Attack failed", 'error');
             }
           }
         }
@@ -288,7 +272,6 @@ const App: React.FC = () => {
          }
       }
 
-      setPlayer(prev => prev ? ({ ...prev, money: prev.money - item.cost }) : null);
       const newState = await gameService.syncState(player.id);
       setGameState(prev => ({ ...prev, ...newState }));
     }
@@ -358,7 +341,7 @@ const App: React.FC = () => {
          <div className="absolute inset-0 flex flex-col items-center justify-center z-[1100] bg-black/80 backdrop-blur-md">
             <Loader2 className="animate-spin text-neon-blue mb-4" size={48} />
             <div className="font-mono text-neon-blue animate-pulse tracking-widest">INITIALIZING UPLINK...</div>
-            <div className="text-xs text-gray-500 mt-2">Checking Neural Network Protocols</div>
+            <div className="text-xs text-gray-500 mt-2">Connecting to Satellite Network</div>
          </div>
       )}
 
@@ -486,7 +469,7 @@ const App: React.FC = () => {
              ? 'bg-red-900/80 border-red-500 text-white' 
              : 'bg-black/80 border-neon-blue/30 text-white'
            }`}>
-              {message.includes("Online") ? <Wifi size={20} className="text-neon-green" /> : 
+              {message.includes("Online") || message.includes("Connected") ? <Wifi size={20} className="text-neon-green" /> : 
                message.includes("Offline") ? <WifiOff size={20} className="text-red-400" /> :
                <Crosshair size={20} className="text-neon-blue" />
               }
