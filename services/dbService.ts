@@ -1,6 +1,4 @@
 
-
-
 import { GameState, Player, Territory } from '../types';
 import { INITIAL_STRENGTH, INITIAL_MONEY, INCOME_PER_TERRITORY, GRID_SIZE, SQL_INIT_DB, SQL_INIT_TABLES, SYSTEM_CONN_STRING, GAME_CONN_STRING, DB_DATABASE_NAME } from '../constants';
 
@@ -213,6 +211,15 @@ export class GameService {
 
   // --- Cloud Logic with SDK ---
 
+  private async waitForSdk(timeoutMs = 5000): Promise<boolean> {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      if (window.sqlitecloud && window.sqlitecloud.Database) return true;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    return false;
+  }
+
   private async createDatabaseIfNeeded() {
      console.log("Checking DB existence...");
      try {
@@ -254,12 +261,14 @@ export class GameService {
   }
 
   public async initDatabase() {
-    console.log("Initializing Game DB Connection (SDK)...");
+    console.log("Initializing Game DB Connection...");
     
-    // Check if SDK loaded
-    if (!window.sqlitecloud) {
-        console.error("SQLiteCloud SDK not loaded!");
+    // Wait for SDK to load (async script)
+    const sdkLoaded = await this.waitForSdk();
+    if (!sdkLoaded) {
+        console.error("SQLiteCloud SDK failed to load (timeout). Starting in Offline Mode.");
         this.offlineMode = true;
+        this.state.connected = false;
         return;
     }
 
