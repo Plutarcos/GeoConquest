@@ -1,4 +1,5 @@
 
+
 import React from 'react';
 import { ShoppingCart, Shield, UserPlus, Skull, X, Zap, Crosshair, ShieldCheck } from 'lucide-react';
 import { SHOP_ITEMS, TRANSLATIONS } from '../constants';
@@ -52,7 +53,7 @@ export const Shop: React.FC<ShopProps> = ({ language, currentMoney, onPurchase, 
                 </div>
               </div>
               <button
-                onClick={() => onPurchase(item)}
+                onClick={() => onPurchase(item as ShopItem)}
                 disabled={currentMoney < item.cost}
                 className={`px-4 py-2 rounded font-bold text-xs uppercase ${
                   currentMoney >= item.cost 

@@ -1,8 +1,9 @@
 
+
 import React from 'react';
 import { Backpack, X, Zap, Shield, UserPlus, Skull, Crosshair, ShieldCheck } from 'lucide-react';
 import { SHOP_ITEMS, TRANSLATIONS } from '../constants';
-import { Language, Player } from '../types';
+import { Language, Player, ShopItem } from '../types';
 
 interface InventoryProps {
   player: Player;
@@ -54,7 +55,7 @@ export const Inventory: React.FC<InventoryProps> = ({ player, language, onUseIte
                     </div>
                 </div>
                 <button
-                    onClick={() => onUseItem(item.id, item.type)}
+                    onClick={() => onUseItem(item.id, item.type as ShopItem['type'])}
                     className="px-4 py-2 rounded font-bold text-xs bg-neon-green text-black hover:bg-green-400 uppercase"
                 >
                     {t.use}
