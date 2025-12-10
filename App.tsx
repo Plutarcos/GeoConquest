@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { GameStatus, Player, GameState, Language, ShopItem, VisualEffect, ChatMessage } from './types';
 import { getUserLocation } from './services/geoService';
@@ -6,8 +7,9 @@ import MapComponent from './components/Map';
 import MapControls from './components/MapControls';
 import HUD from './components/HUD';
 import { Shop } from './components/Shop';
+import { Inventory } from './components/Inventory';
 import Chat from './components/Chat';
-import { Loader2, Crosshair, MapPin, Play, Wifi, WifiOff, AlertTriangle } from 'lucide-react';
+import { Loader2, Crosshair, MapPin, Play, Wifi, WifiOff, AlertTriangle, MousePointer2 } from 'lucide-react';
 import { TRANSLATIONS } from './constants';
 
 const App: React.FC = () => {
@@ -34,10 +36,15 @@ const App: React.FC = () => {
   const [message, setMessage] = useState<string | null>(null);
   const [isLocating, setIsLocating] = useState(false);
   const [showShop, setShowShop] = useState(false);
+  const [showInventory, setShowInventory] = useState(false);
   const [showChat, setShowChat] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(16);
   const [recenterTrigger, setRecenterTrigger] = useState(0); 
   const [visualEffects, setVisualEffects] = useState<VisualEffect[]>([]);
+  
+  // Action Modes
+  const [targetingItem, setTargetingItem] = useState<{id: string, type: string} | null>(null);
+  const [transferSource, setTransferSource] = useState<string | null>(null);
   
   // Chat State
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -72,7 +79,7 @@ const App: React.FC = () => {
       const interval = setInterval(async () => {
         const syncedState = await gameService.syncState(player?.id || null);
         
-        // Permadeath Check: If synced player data is missing/null but we are playing, we died
+        // Permadeath Check
         if (player && syncedState.players && !syncedState.players[player.id]) {
            showToast("FATAL ERROR: SIGNAL LOST. BASE DESTROYED.", 'error');
            localStorage.removeItem('geoconquest_user');
@@ -84,10 +91,12 @@ const App: React.FC = () => {
           if (player && syncedState.players[player.id]) {
             setPlayer(prevP => {
                 if (!prevP) return null;
+                const pData = syncedState.players[player.id];
                 return { 
                     ...prevP, 
-                    money: syncedState.players[player.id].money,
-                    energy: syncedState.players[player.id].energy
+                    money: pData.money,
+                    energy: pData.energy,
+                    inventory: pData.inventory
                 };
             });
           }
@@ -104,7 +113,7 @@ const App: React.FC = () => {
     }
   }, [status, player]);
 
-  // Setup Phase: Auto-locate
+  // Setup Phase: Auto-locate and Check if new or returning
   useEffect(() => {
     if (status === GameStatus.SETUP) {
       setIsLocating(true);
@@ -114,8 +123,27 @@ const App: React.FC = () => {
            
            await gameService.initLocalGrid(loc.lat, loc.lng);
            const latestState = await gameService.syncState(player?.id || null);
-           const myTerritoryId = gameService.getGridId(loc.lat, loc.lng);
            
+           // CHECK IF RETURNING PLAYER
+           if (player) {
+               const ownedCount = await gameService.getUserTerritoryCount(player.id);
+               if (ownedCount > 0) {
+                   // Skip Setup
+                   setGameState(prev => ({ 
+                    ...prev, 
+                    ...latestState,
+                    centerLat: loc.lat,
+                    centerLng: loc.lng 
+                   }));
+                   setRecenterTrigger(prev => prev + 1);
+                   setStatus(GameStatus.PLAYING);
+                   showToast(`Welcome back, Commander. You own ${ownedCount} sectors.`, 'success');
+                   setIsLocating(false);
+                   return;
+               }
+           }
+
+           const myTerritoryId = gameService.getGridId(loc.lat, loc.lng);
            setGameState(prev => ({ 
              ...prev, 
              ...latestState,
@@ -180,7 +208,6 @@ const App: React.FC = () => {
     e.preventDefault();
     if (isInitializing) return;
 
-    // Guest Mode
     let finalUsername = username.trim();
     if (!finalUsername) {
         finalUsername = `Guest_${Math.floor(Math.random()*9999)}`;
@@ -190,7 +217,6 @@ const App: React.FC = () => {
       const user = await gameService.login(finalUsername, password);
       setPlayer(user);
       if (password) {
-        // Only save session if secured
         localStorage.setItem('geoconquest_user', JSON.stringify(user));
       }
       setStatus(GameStatus.SETUP);
@@ -204,7 +230,6 @@ const App: React.FC = () => {
   const handleStartGame = async () => {
     if (!player || !gameState.selectedTerritoryId) return;
 
-    // SETUP RULE: Cannot start on occupied territory
     const tStart = gameState.territories[gameState.selectedTerritoryId];
     if (tStart && tStart.ownerId && tStart.ownerId !== player.id) {
         showToast(t.error_occupied, 'error');
@@ -232,7 +257,56 @@ const App: React.FC = () => {
     const clickedTerritory = gameState.territories[clickedId]; 
     if (!clickedTerritory) return; 
 
-    // 1. Clicked OWNED territory -> Select it (allows upgrades)
+    // --- MODE: ITEM TARGETING ---
+    if (targetingItem) {
+        if (targetingItem.type === 'player' || targetingItem.type === 'territory') {
+            // Usually beneficial, usually targeting self
+            // But some items like 'sabotage' (type=enemy) might be handled here if types confuse
+        }
+
+        const result = await gameService.useItem(player.id, targetingItem.id, clickedId);
+        showToast(result.message, result.success ? 'success' : 'error');
+        
+        if (result.success) {
+            setTargetingItem(null); // Exit mode
+            // Add visual
+            addVisualEffect("ITEM USED", clickedTerritory.lat, clickedTerritory.lng, 'info');
+        }
+        return;
+    }
+
+    // --- MODE: TROOP TRANSFER ---
+    if (transferSource) {
+        if (transferSource === clickedId) {
+            setTransferSource(null); // Cancel
+            return;
+        }
+
+        const sourceT = gameState.territories[transferSource];
+        if (sourceT) {
+            if (!gameService.isAdjacent(sourceT, clickedTerritory)) {
+                showToast(t.error_adjacent, 'error');
+                return;
+            }
+            // Logic: Transfer half strength or fixed? Let's say 10 or half.
+            const amount = Math.floor(sourceT.strength / 2);
+            if (amount < 5) {
+                showToast("Not enough troops to transfer", 'error');
+                return;
+            }
+            const result = await gameService.transferTroops(player.id, transferSource, clickedId, amount);
+            showToast(result.message, result.success ? 'success' : 'error');
+            if (result.success) {
+                setTransferSource(null);
+                addVisualEffect(`moved ${amount}`, clickedTerritory.lat, clickedTerritory.lng, 'green');
+            }
+        }
+        return;
+    }
+
+    // --- NORMAL MODE ---
+
+    // 1. Clicked OWNED territory -> Select it
     if (clickedTerritory.ownerId === player.id) {
       setGameState(prev => ({ ...prev, selectedTerritoryId: clickedId }));
     } else {
@@ -241,18 +315,15 @@ const App: React.FC = () => {
         const source = gameState.territories[gameState.selectedTerritoryId];
         let attackSuccess = false;
 
-        if (source) {
-          // GAMEPLAY RULE: Adjacency Check
+        if (source && source.ownerId === player.id) {
           if (!gameService.isAdjacent(source, clickedTerritory)) {
              showToast(t.error_adjacent, 'error');
              return;
           }
 
-          // Attack Logic
           const result = await gameService.attackTerritory(player.id, gameState.selectedTerritoryId, clickedId);
           attackSuccess = result.success;
 
-          // Show combat text
           if (result.success) {
             addVisualEffect("VICTORY", clickedTerritory.lat, clickedTerritory.lng, 'heal');
             addVisualEffect("-1", source.lat, source.lng, 'info');
@@ -265,9 +336,11 @@ const App: React.FC = () => {
                showToast(result.message || "Attack failed", 'error');
             }
           }
+        } else {
+             // If selected territory is NOT mine, I can't attack from it. Just select the new one.
+             setGameState(prev => ({ ...prev, selectedTerritoryId: clickedId }));
         }
 
-        // Force Sync immediately
         const newState = await gameService.syncState(player.id);
         setGameState(prev => ({
            ...prev, 
@@ -275,42 +348,35 @@ const App: React.FC = () => {
            selectedTerritoryId: attackSuccess ? null : prev.selectedTerritoryId
         }));
       } else {
-        showToast(t.cmd_select, 'info');
+        setGameState(prev => ({ ...prev, selectedTerritoryId: clickedId }));
       }
     }
   };
 
   const handlePurchase = async (item: ShopItem) => {
     if (!player) return;
-    
-    let targetId: string | undefined = undefined;
-    // Items that require a selected territory
-    if (['recruit', 'fortify', 'sabotage', 'airstrike', 'shield'].includes(item.id)) {
-       if (!gameState.selectedTerritoryId) {
-         showToast("Select a territory first!", 'error');
-         return;
-       }
-       targetId = gameState.selectedTerritoryId;
-    }
-
-    const result = await gameService.purchaseUpgrade(player.id, item.id, targetId);
+    const result = await gameService.purchaseItem(player.id, item.id, item.cost);
     showToast(result.message, result.success ? 'success' : 'error');
     
     if (result.success) {
-      if (targetId) {
-         const t = gameState.territories[targetId];
-         if (t) {
-            if (item.id === 'recruit') addVisualEffect("+10", t.lat, t.lng, 'heal');
-            if (item.id === 'fortify') addVisualEffect("+20", t.lat, t.lng, 'heal');
-            if (item.id === 'shield') addVisualEffect("+50", t.lat, t.lng, 'heal');
-            if (item.id === 'sabotage') addVisualEffect("-15", t.lat, t.lng, 'damage');
-            if (item.id === 'airstrike') addVisualEffect("-50", t.lat, t.lng, 'damage');
-         }
-      }
-
       const newState = await gameService.syncState(player.id);
       setGameState(prev => ({ ...prev, ...newState }));
     }
+  };
+
+  const handleUseItemStart = (itemId: string, type: 'territory'|'player'|'enemy') => {
+      if (type === 'player') {
+          // Instant use
+          gameService.useItem(player!.id, itemId).then(res => {
+             showToast(res.message, res.success ? 'success' : 'error');
+             setShowInventory(false);
+          });
+      } else {
+          // Enter targeting mode
+          setTargetingItem({id: itemId, type});
+          setShowInventory(false);
+          showToast(t.select_target, 'info');
+      }
   };
 
   const showToast = (msg: string, type: 'info'|'success'|'error' = 'info') => {
@@ -319,19 +385,16 @@ const App: React.FC = () => {
   };
 
   const handleRecenter = () => {
-    // If we have GPS location, use it
     if (userRealLocation.current) {
        setGameState(prev => ({ 
          ...prev, 
          centerLat: userRealLocation.current!.lat, 
          centerLng: userRealLocation.current!.lng 
        }));
-       setZoomLevel(16); // Reset Zoom
+       setZoomLevel(16);
        setRecenterTrigger(prev => prev + 1);
        return;
     }
-
-    // Fallback to selected territory
     if (gameState.selectedTerritoryId) {
        const t = gameState.territories[gameState.selectedTerritoryId];
        if (t) {
@@ -362,6 +425,18 @@ const App: React.FC = () => {
              />
          )}
       </div>
+
+      {/* Target Mode Overlay */}
+      {targetingItem && (
+          <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[900] bg-neon-green/90 text-black px-4 py-2 rounded-full font-bold animate-pulse flex items-center gap-2 cursor-pointer" onClick={() => setTargetingItem(null)}>
+              <MousePointer2 size={20} /> {t.select_target} (Click to Cancel)
+          </div>
+      )}
+      {transferSource && (
+          <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[900] bg-blue-500/90 text-white px-4 py-2 rounded-full font-bold animate-pulse flex items-center gap-2 cursor-pointer" onClick={() => setTransferSource(null)}>
+              <MousePointer2 size={20} /> {t.select_transfer} (Click to Cancel)
+          </div>
+      )}
 
       {/* Map Controls */}
       {(status === GameStatus.PLAYING || status === GameStatus.SETUP) && (
@@ -477,12 +552,15 @@ const App: React.FC = () => {
           language={language}
           connected={gameState.connected}
           hasUnreadMessages={hasUnread}
+          selectedTerritory={gameState.selectedTerritoryId ? gameState.territories[gameState.selectedTerritoryId] : null}
           onLanguageChange={setLanguage}
           onToggleShop={() => setShowShop(true)}
+          onToggleInventory={() => setShowInventory(true)}
           onToggleChat={() => {
              setShowChat(!showChat);
              if (!showChat) setHasUnread(false);
           }}
+          onTransferStart={() => setTransferSource(gameState.selectedTerritoryId)}
           onReset={() => gameService.resetGame()}
           onLogout={() => window.location.reload()}
         />
@@ -495,6 +573,16 @@ const App: React.FC = () => {
           currentMoney={player.money}
           onPurchase={handlePurchase}
           onClose={() => setShowShop(false)}
+        />
+      )}
+
+      {/* Inventory */}
+      {!isInitializing && showInventory && player && (
+        <Inventory 
+          player={player}
+          language={language}
+          onUseItem={handleUseItemStart}
+          onClose={() => setShowInventory(false)}
         />
       )}
 

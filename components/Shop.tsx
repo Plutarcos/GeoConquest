@@ -1,5 +1,6 @@
+
 import React from 'react';
-import { ShoppingCart, Shield, UserPlus, Skull, X, Zap, ShieldCheck } from 'lucide-react';
+import { ShoppingCart, Shield, UserPlus, Skull, X, Zap, Crosshair, ShieldCheck } from 'lucide-react';
 import { SHOP_ITEMS, TRANSLATIONS } from '../constants';
 import { Language, ShopItem } from '../types';
 
@@ -19,6 +20,7 @@ export const Shop: React.FC<ShopProps> = ({ language, currentMoney, onPurchase, 
       case 'Shield': return <Shield size={24} />;
       case 'Skull': return <Skull size={24} />;
       case 'Zap': return <Zap size={24} />;
+      case 'Crosshair': return <Crosshair size={24} />;
       case 'ShieldCheck': return <ShieldCheck size={24} />;
       default: return <ShoppingCart size={24} />;
     }
@@ -39,7 +41,7 @@ export const Shop: React.FC<ShopProps> = ({ language, currentMoney, onPurchase, 
            {t.money}: ${currentMoney}
         </div>
 
-        <div className="space-y-3">
+        <div className="space-y-3 max-h-[60vh] overflow-y-auto">
           {SHOP_ITEMS.map((item) => (
             <div key={item.id} className="bg-black/40 border border-gray-700 p-4 rounded-lg flex items-center justify-between hover:border-gray-500 transition">
               <div className="flex items-center gap-3">
@@ -52,7 +54,7 @@ export const Shop: React.FC<ShopProps> = ({ language, currentMoney, onPurchase, 
               <button
                 onClick={() => onPurchase(item)}
                 disabled={currentMoney < item.cost}
-                className={`px-4 py-2 rounded font-bold text-sm ${
+                className={`px-4 py-2 rounded font-bold text-xs uppercase ${
                   currentMoney >= item.cost 
                     ? "bg-neon-blue text-black hover:bg-cyan-400" 
                     : "bg-gray-800 text-gray-500 cursor-not-allowed"

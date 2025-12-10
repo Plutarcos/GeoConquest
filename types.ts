@@ -1,3 +1,4 @@
+
 export interface Player {
   id: string;
   username: string;
@@ -5,7 +6,8 @@ export interface Player {
   money: number;
   energy: number;
   maxEnergy: number;
-  lastSeen?: number; // Timestamp for online status
+  inventory: Record<string, number>; // ItemId -> Count
+  lastSeen?: number; 
 }
 
 export interface Territory {
@@ -25,7 +27,7 @@ export interface GameState {
   lastUpdate: number;
   centerLat: number;
   centerLng: number;
-  connected: boolean; // Connection status
+  connected: boolean; 
 }
 
 export interface GeoLocation {
@@ -49,6 +51,7 @@ export interface ShopItem {
   cost: number;
   effect: string;
   icon: string;
+  type: 'territory' | 'player' | 'enemy';
 }
 
 export interface VisualEffect {

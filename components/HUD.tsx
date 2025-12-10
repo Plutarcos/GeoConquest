@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Player, Territory, Language } from '../types';
-import { Globe, ShieldAlert, RefreshCw, ShoppingCart, DollarSign, LogOut, MessageSquare, Cloud, CloudOff } from 'lucide-react';
+import { Globe, ShieldAlert, RefreshCw, ShoppingCart, DollarSign, LogOut, MessageSquare, Cloud, CloudOff, Zap, Backpack, ArrowRightLeft } from 'lucide-react';
 import { TRANSLATIONS } from '../constants';
 
 interface HUDProps {
@@ -10,11 +10,14 @@ interface HUDProps {
   language: Language;
   connected: boolean;
   hasUnreadMessages: boolean;
+  selectedTerritory: Territory | null;
   onLanguageChange: (lang: Language) => void;
   onToggleShop: () => void;
+  onToggleInventory: () => void;
   onToggleChat: () => void;
   onReset: () => void;
   onLogout: () => void;
+  onTransferStart: () => void;
 }
 
 const HUD: React.FC<HUDProps> = ({ 
@@ -23,16 +26,20 @@ const HUD: React.FC<HUDProps> = ({
   language, 
   connected,
   hasUnreadMessages,
+  selectedTerritory,
   onLanguageChange,
   onToggleShop,
+  onToggleInventory,
   onToggleChat,
   onReset, 
-  onLogout 
+  onLogout,
+  onTransferStart
 }) => {
   const t = TRANSLATIONS[language];
   const ownedTerritories = (Object.values(territories) as Territory[]).filter(t => t.ownerId === player.id);
   const totalStrength = ownedTerritories.reduce((acc, t) => acc + t.strength, 0);
   const totalCount = ownedTerritories.length;
+  const isSelectedMine = selectedTerritory?.ownerId === player.id;
 
   return (
     <>
@@ -77,6 +84,14 @@ const HUD: React.FC<HUDProps> = ({
                 <span className="font-mono font-bold text-white">{totalStrength}</span>
              </div>
           </div>
+          
+          {/* Energy Bar */}
+           <div className="w-full h-1.5 bg-gray-700 rounded-full mt-1 overflow-hidden">
+             <div className="h-full bg-gradient-to-r from-purple-500 to-yellow-400" style={{ width: `${Math.min(100, (player.energy / player.maxEnergy) * 100)}%` }}></div>
+           </div>
+           <div className="flex justify-between text-[8px] text-gray-400 uppercase">
+              <Zap size={8} /> <span>{Math.floor(player.energy)} EN</span>
+           </div>
         </div>
 
         {/* Right Side: Money & Status */}
@@ -88,10 +103,26 @@ const HUD: React.FC<HUDProps> = ({
 
           <div className={`bg-panel-bg backdrop-blur-md border px-2 py-1 rounded-full shadow-lg flex items-center gap-1.5 text-[10px] font-bold uppercase ${connected ? 'border-green-500/30 text-green-400' : 'border-red-500/30 text-red-400'}`}>
              {connected ? <Cloud size={12} /> : <CloudOff size={12} />}
-             <span>{connected ? t.active : t.live}</span>
+             <span>{connected ? t.active : t.offline}</span>
           </div>
         </div>
       </div>
+
+      {/* --- Territory Command Bar (Contextual) --- */}
+      {selectedTerritory && isSelectedMine && (
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-[500] pointer-events-auto animate-in slide-in-from-bottom-4">
+           <div className="bg-panel-bg border border-neon-blue/50 rounded-xl p-2 px-4 shadow-lg flex items-center gap-3">
+               <span className="text-neon-blue font-bold text-sm border-r border-gray-600 pr-3">{selectedTerritory.name}</span>
+               
+               <button 
+                  onClick={onTransferStart}
+                  className="bg-blue-600/30 hover:bg-blue-600 text-blue-200 p-2 rounded flex items-center gap-2 text-xs font-bold transition"
+               >
+                  <ArrowRightLeft size={16} /> {t.transfer}
+               </button>
+           </div>
+        </div>
+      )}
 
       {/* --- BOTTOM BAR (Actions) --- */}
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[500] w-full max-w-md px-4 pointer-events-auto">
@@ -121,17 +152,15 @@ const HUD: React.FC<HUDProps> = ({
               </div>
               <span className="text-[10px] font-bold uppercase tracking-wide">{t.shop}</span>
             </button>
-
-            <div className="w-px h-8 bg-gray-700"></div>
-
+            
             <button 
-              onClick={onReset}
-              className="flex flex-col items-center gap-1 p-2 text-red-400 hover:text-red-200 transition active:scale-95 group"
+              onClick={onToggleInventory}
+              className="flex flex-col items-center gap-1 p-2 text-green-400 hover:text-green-200 transition active:scale-95 group"
             >
-              <div className="bg-red-500/10 p-2 rounded-lg group-hover:bg-red-500/30 border border-transparent group-hover:border-red-500/50 transition">
-                <RefreshCw size={24} />
+              <div className="bg-green-500/20 p-2 rounded-lg group-hover:bg-green-500/40 border border-transparent group-hover:border-green-500/50 transition">
+                <Backpack size={24} />
               </div>
-              <span className="text-[10px] font-bold uppercase tracking-wide">{t.reset}</span>
+              <span className="text-[10px] font-bold uppercase tracking-wide">{t.inventory}</span>
             </button>
 
             <div className="w-px h-8 bg-gray-700"></div>
