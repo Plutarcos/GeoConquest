@@ -34,13 +34,43 @@ export const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiO
 
 // SQL Commands Reference
 export const SQL_INIT_COMMANDS = `
--- Run these in Supabase SQL Editor
+-- COPY AND PASTE THIS INTO SUPABASE SQL EDITOR TO FIX DATABASE
 
--- 1. Add Inventory & Password Columns
-ALTER TABLE players ADD COLUMN IF NOT EXISTS inventory JSONB DEFAULT '{}'::jsonb;
-ALTER TABLE players ADD COLUMN IF NOT EXISTS password TEXT;
+-- 1. Create Players Table
+CREATE TABLE IF NOT EXISTS players (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    color TEXT NOT NULL,
+    money NUMERIC DEFAULT 100,
+    energy NUMERIC DEFAULT 100,
+    inventory JSONB DEFAULT '{}'::jsonb,
+    last_seen BIGINT
+);
 
--- 2. Purchase Item to Inventory Function
+-- 2. Create Territories Table
+CREATE TABLE IF NOT EXISTS territories (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    owner_id TEXT REFERENCES players(id),
+    strength INTEGER DEFAULT 10,
+    lat FLOAT NOT NULL,
+    lng FLOAT NOT NULL
+);
+
+-- 3. Enable Realtime
+alter publication supabase_realtime add table territories;
+alter publication supabase_realtime add table players;
+
+-- 4. Enable Public Access (Since we use custom auth)
+ALTER TABLE players ENABLE ROW LEVEL SECURITY;
+ALTER TABLE territories ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Public Players Access" ON players FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Public Territories Access" ON territories FOR ALL USING (true) WITH CHECK (true);
+
+-- 5. Helper Functions
+
+-- Purchase Item
 CREATE OR REPLACE FUNCTION purchase_item(
   player_id TEXT, 
   item_id TEXT, 
@@ -57,15 +87,11 @@ BEGIN
   SELECT money, inventory INTO current_money, current_inv FROM players WHERE id = player_id;
   
   IF current_money >= cost THEN
-    -- Deduct Money
     UPDATE players SET money = money - cost WHERE id = player_id;
-    
-    -- Update Inventory
     new_count := COALESCE((current_inv->>item_id)::INTEGER, 0) + 1;
     UPDATE players 
     SET inventory = jsonb_set(COALESCE(inventory, '{}'::jsonb), ARRAY[item_id], to_jsonb(new_count))
     WHERE id = player_id;
-    
     RETURN TRUE;
   ELSE
     RETURN FALSE;
@@ -73,7 +99,54 @@ BEGIN
 END;
 $$;
 
--- 3. Use Item Function
+-- Attack Territory
+CREATE OR REPLACE FUNCTION attack_territory(
+  attacker_id TEXT,
+  source_id TEXT,
+  target_id TEXT,
+  energy_cost NUMERIC
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  att_strength INTEGER;
+  def_strength INTEGER;
+  attacker_energy NUMERIC;
+  def_owner TEXT;
+  def_territory_count INTEGER;
+BEGIN
+  SELECT strength, owner_id INTO att_strength, def_owner FROM territories WHERE id = source_id;
+  SELECT strength, owner_id INTO def_strength, def_owner FROM territories WHERE id = target_id;
+  SELECT energy INTO attacker_energy FROM players WHERE id = attacker_id;
+
+  IF attacker_energy < energy_cost OR att_strength <= 1 THEN
+     RETURN jsonb_build_object('success', false, 'message', 'Recursos insuficientes');
+  END IF;
+
+  UPDATE players SET energy = energy - energy_cost WHERE id = attacker_id;
+  UPDATE territories SET strength = 1 WHERE id = source_id;
+
+  IF att_strength > def_strength THEN
+     UPDATE territories SET strength = (att_strength - def_strength), owner_id = attacker_id WHERE id = target_id;
+     
+     -- PERMADEATH CHECK
+     IF def_owner IS NOT NULL THEN
+        SELECT COUNT(*) INTO def_territory_count FROM territories WHERE owner_id = def_owner;
+        IF def_territory_count = 0 THEN
+           DELETE FROM players WHERE id = def_owner;
+        END IF;
+     END IF;
+
+     RETURN jsonb_build_object('success', true, 'message', 'Conquistado');
+  ELSE
+     UPDATE territories SET strength = GREATEST(1, def_strength - (att_strength / 2)) WHERE id = target_id;
+     RETURN jsonb_build_object('success', false, 'message', 'Defesa resistiu');
+  END IF;
+END;
+$$;
+
+-- Use Item
 CREATE OR REPLACE FUNCTION use_item(
   player_id TEXT,
   item_id TEXT,
@@ -90,11 +163,9 @@ BEGIN
   item_count := COALESCE((current_inv->>item_id)::INTEGER, 0);
 
   IF item_count > 0 THEN
-    -- Consumable Logic
     IF item_id = 'stimpack' THEN
        UPDATE players SET energy = LEAST(100, energy + 50) WHERE id = player_id;
     ELSIF target_territory_id IS NOT NULL THEN
-       -- Territory Effects
        IF item_id = 'recruit' THEN
           UPDATE territories SET strength = strength + 10 WHERE id = target_territory_id;
        ELSIF item_id = 'fortify' THEN
@@ -108,19 +179,18 @@ BEGIN
        END IF;
     END IF;
 
-    -- Decrement Inventory
     UPDATE players 
     SET inventory = jsonb_set(inventory, ARRAY[item_id], to_jsonb(item_count - 1))
     WHERE id = player_id;
 
-    RETURN jsonb_build_object('success', true);
+    RETURN jsonb_build_object('success', true, 'message', 'Item usado');
   ELSE
-    RETURN jsonb_build_object('success', false, 'message', 'Item not found');
+    RETURN jsonb_build_object('success', false, 'message', 'Item não encontrado');
   END IF;
 END;
 $$;
 
--- 4. Transfer Troops Function
+-- Transfer Troops
 CREATE OR REPLACE FUNCTION transfer_strength(
   player_id TEXT,
   source_id TEXT,
@@ -140,15 +210,9 @@ BEGIN
     RETURN FALSE;
   END IF;
 
-  -- Move troops
   UPDATE territories SET strength = strength - amount WHERE id = source_id;
   UPDATE territories SET strength = strength + amount WHERE id = target_id;
   
-  -- If target was empty/enemy and adjacent (logic handled in client for adjacency, but here for ownership update if needed)
-  -- For now assumes friendly transfer or reinforcement. 
-  -- If attacking via transfer, ownership change logic would be here, but let's keep transfer for logistics.
-  UPDATE territories SET owner_id = player_id WHERE id = target_id AND owner_id IS NULL;
-
   RETURN TRUE;
 END;
 $$;

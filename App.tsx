@@ -221,7 +221,7 @@ const App: React.FC = () => {
       addChatMessage(`Agent ${user.username} connected.`, "System", true);
     } catch (error: any) {
       console.error(error);
-      setMessage(error.message || "Login failed.");
+      setMessage(`ERROR: ${error.message || "Login failed"}`);
     }
   };
 

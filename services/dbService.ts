@@ -49,13 +49,8 @@ export class GameService {
         }
       });
       
-      // Test connection
-      const { error } = await this.supabase.from('players').select('id').limit(1);
-      
-      if (error && error.code !== 'PGRST116') { 
-          throw error;
-      }
-
+      // Test connection simply
+      // We don't throw error here if table is missing, we catch it at login
       this.state.connected = true;
       this.offlineMode = false;
       console.log("Supabase Connected.");
@@ -115,38 +110,59 @@ export class GameService {
         };
     }
 
-    // Upsert Player
-    const { data, error } = await this.supabase
-        .from('players')
-        .upsert({ 
-            id, 
-            username, 
-            color, 
-            last_seen: now,
-            inventory: {}
-        }, { onConflict: 'id', ignoreDuplicates: false })
-        .select()
-        .single();
+    try {
+        // 1. Try to FIND the user first
+        let { data, error } = await this.supabase
+            .from('players')
+            .select('*')
+            .eq('id', id)
+            .single();
 
-    if (error || !data) {
-        console.error("Login Error", error);
-        throw new Error("Login failed (Connection error)");
+        if (error && error.code !== 'PGRST116') {
+            // Real database error (connection, etc)
+            console.error("Fetch Error:", error);
+            throw error;
+        }
+
+        // 2. If not found (PGRST116), CREATE the user
+        if (!data) {
+            console.log("User not found, creating new one...");
+            const { data: newData, error: createError } = await this.supabase
+                .from('players')
+                .insert([{ 
+                    id, 
+                    username, 
+                    color, 
+                    money: INITIAL_MONEY,
+                    energy: 100,
+                    inventory: {},
+                    last_seen: now 
+                }])
+                .select()
+                .single();
+            
+            if (createError) {
+                console.error("Create Error:", createError);
+                throw createError;
+            }
+            data = newData;
+        }
+
+        // Return the user data
+        return {
+            id: data.id,
+            username: data.username,
+            color: data.color,
+            money: Number(data.money),
+            energy: Number(data.energy),
+            maxEnergy: 100,
+            lastSeen: data.last_seen,
+            inventory: data.inventory || {}
+        };
+    } catch (e: any) {
+        console.error("Login Fatal Error:", e);
+        throw new Error(e.message || "Login failed (Connection error)");
     }
-
-    // Ensure defaults if new
-    if (data.money === null) data.money = INITIAL_MONEY;
-    if (data.energy === null) data.energy = 100;
-
-    return {
-        id: data.id,
-        username: data.username,
-        color: data.color,
-        money: Number(data.money),
-        energy: Number(data.energy),
-        maxEnergy: 100,
-        lastSeen: data.last_seen,
-        inventory: data.inventory || {}
-    };
   }
 
   public async getUserTerritoryCount(playerId: string): Promise<number> {
@@ -237,6 +253,7 @@ export class GameService {
 
     // Batch Fetch
     if (!this.offlineMode && this.supabase && idsToFetch.length > 0) {
+        // Only try to fetch if we have items
         const { data } = await this.supabase.from('territories').select('*').in('id', idsToFetch);
         const existingIds = new Set((data || []).map((t: any) => t.id));
 
@@ -265,8 +282,6 @@ export class GameService {
      if (myTerrs && myTerrs.length > 0) {
          // Money
          const income = myTerrs.length * INCOME_PER_TERRITORY;
-         await this.supabase.rpc('purchase_item', { player_id: playerId, item_id: 'passive_income', cost: -income }); // Negative cost = add money hack using existing function or update directly
-         // Better:
          await this.supabase.from('players').update({ money: this.state.players[playerId].money + income }).eq('id', playerId);
 
          // Strength
