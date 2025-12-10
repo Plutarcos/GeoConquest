@@ -25,7 +25,7 @@ export const INCOME_PER_TERRITORY = 5;
 export const GROWTH_RATE_MS = 10000; // 10 seconds passive tick
 export const MAX_STRENGTH = 5000;
 export const ENERGY_MAX = 100;
-export const ENERGY_REGEN = 2; 
+export const ENERGY_REGEN = 5; 
 export const ENERGY_COST_ATTACK = 20;
 
 // Supabase Configuration
@@ -164,7 +164,7 @@ BEGIN
 END;
 $$;
 
--- Passive Growth (NEW)
+-- Passive Growth (ENHANCED: Money & Energy based on Strength/Count)
 CREATE OR REPLACE FUNCTION passive_territory_growth(player_id TEXT)
 RETURNS VOID
 LANGUAGE plpgsql
@@ -172,17 +172,34 @@ SECURITY DEFINER
 AS $$
 DECLARE
   terr_count INTEGER;
+  total_strength INTEGER;
+  income_amount NUMERIC;
 BEGIN
   -- 1. Increase Strength of all owned territories by 1 (up to max 100 passively)
   UPDATE territories 
   SET strength = strength + 1 
   WHERE owner_id = player_id AND strength < 100;
 
-  -- 2. Give Income
-  SELECT COUNT(*) INTO terr_count FROM territories WHERE owner_id = player_id;
+  -- 2. Calculate Stats
+  SELECT COUNT(*), COALESCE(SUM(strength), 0) 
+  INTO terr_count, total_strength 
+  FROM territories 
+  WHERE owner_id = player_id;
+
+  -- 3. Apply Resources
   IF terr_count > 0 THEN
+    -- Income: 5 per territory + 10% of total strength
+    income_amount := (terr_count * 5) + FLOOR(total_strength * 0.1);
+    
     UPDATE players 
-    SET money = money + (terr_count * 5) -- 5 credits per territory
+    SET 
+      money = money + income_amount,
+      energy = LEAST(100, energy + 5)
+    WHERE id = player_id;
+  ELSE
+    -- Survival Regen (no territories)
+    UPDATE players 
+    SET energy = LEAST(100, energy + 2)
     WHERE id = player_id;
   END IF;
 END;
@@ -260,7 +277,7 @@ BEGIN
   RETURN TRUE;
 END;
 $$;
-`
+
 export const TRANSLATIONS = {
   'pt-BR': {
     territories: 'Territórios',

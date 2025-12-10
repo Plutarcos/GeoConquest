@@ -1,7 +1,8 @@
 
+
 import React from 'react';
 import { Player, Territory, Language } from '../types';
-import { Globe, ShieldAlert, RefreshCw, ShoppingCart, DollarSign, LogOut, MessageSquare, Cloud, CloudOff, Zap, Backpack, ArrowRightLeft } from 'lucide-react';
+import { Globe, ShieldAlert, RefreshCw, ShoppingCart, DollarSign, LogOut, MessageSquare, Cloud, CloudOff, Zap, Backpack, ArrowRightLeft, TrendingUp } from 'lucide-react';
 import { TRANSLATIONS } from '../constants';
 
 interface HUDProps {
@@ -40,6 +41,9 @@ const HUD: React.FC<HUDProps> = ({
   const totalStrength = ownedTerritories.reduce((acc, t) => acc + t.strength, 0);
   const totalCount = ownedTerritories.length;
   const isSelectedMine = selectedTerritory?.ownerId === player.id;
+  
+  // Calculate Passive Income: 5 per territory + 10% of total strength
+  const projectedIncome = (totalCount * 5) + Math.floor(totalStrength * 0.1);
 
   return (
     <>
@@ -90,15 +94,23 @@ const HUD: React.FC<HUDProps> = ({
              <div className="h-full bg-gradient-to-r from-purple-500 to-yellow-400" style={{ width: `${Math.min(100, (player.energy / player.maxEnergy) * 100)}%` }}></div>
            </div>
            <div className="flex justify-between text-[8px] text-gray-400 uppercase">
-              <Zap size={8} /> <span>{Math.floor(player.energy)} EN</span>
+              <span className="flex items-center gap-1"><Zap size={8} /> {Math.floor(player.energy)} EN</span>
+              <span className="text-green-400 animate-pulse">+5/10s</span>
            </div>
         </div>
 
         {/* Right Side: Money & Status */}
         <div className="flex flex-col items-end gap-2 pointer-events-auto">
-          <div className="bg-panel-bg backdrop-blur-md border border-neon-green/30 px-4 py-2 rounded-full shadow-lg flex items-center gap-2 text-neon-green">
-             <DollarSign size={18} />
-             <span className="font-mono font-bold text-xl">${Math.floor(player.money)}</span>
+          <div className="flex flex-col items-end">
+             <div className="bg-panel-bg backdrop-blur-md border border-neon-green/30 px-4 py-2 rounded-full shadow-lg flex items-center gap-2 text-neon-green">
+                <DollarSign size={18} />
+                <span className="font-mono font-bold text-xl">${Math.floor(player.money)}</span>
+             </div>
+             {projectedIncome > 0 && (
+                 <div className="flex items-center gap-1 text-[10px] text-green-400 font-mono mt-1 pr-2">
+                     <TrendingUp size={10} /> +${projectedIncome}/10s
+                 </div>
+             )}
           </div>
 
           <div className={`bg-panel-bg backdrop-blur-md border px-2 py-1 rounded-full shadow-lg flex items-center gap-1.5 text-[10px] font-bold uppercase ${connected ? 'border-green-500/30 text-green-400' : 'border-red-500/30 text-red-400'}`}>
