@@ -10,7 +10,7 @@ import HUD from './components/HUD';
 import { Shop } from './components/Shop';
 import { Inventory } from './components/Inventory';
 import Chat from './components/Chat';
-import { Loader2, Crosshair, MapPin, Play, Wifi, WifiOff, AlertTriangle, MousePointer2 } from 'lucide-react';
+import { Loader2, Crosshair, MapPin, Play, Wifi, WifiOff, AlertTriangle, MousePointer2, XCircle } from 'lucide-react';
 import { TRANSLATIONS } from './constants';
 
 const App: React.FC = () => {
@@ -406,7 +406,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="w-screen h-screen overflow-hidden bg-dark-bg text-white font-sans relative select-none">
+    <div className={`w-screen h-screen overflow-hidden bg-dark-bg text-white font-sans relative select-none ${targetingItem ? 'cursor-crosshair' : ''}`}>
       
       {/* Background Map */}
       <div className={`transition-all duration-1000 w-full h-full ${status === GameStatus.PLAYING || status === GameStatus.SETUP ? 'opacity-100' : 'opacity-30 blur-sm'}`}>
@@ -427,15 +427,37 @@ const App: React.FC = () => {
          )}
       </div>
 
-      {/* Target Mode Overlay */}
+      {/* Target Mode Overlay HUD */}
       {targetingItem && (
-          <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[900] bg-neon-green/90 text-black px-4 py-2 rounded-full font-bold animate-pulse flex items-center gap-2 cursor-pointer" onClick={() => setTargetingItem(null)}>
-              <MousePointer2 size={20} /> {t.select_target} (Click to Cancel)
+          <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[900] bg-neon-green/90 text-black px-6 py-3 rounded-full font-bold animate-pulse flex items-center gap-4 shadow-[0_0_30px_rgba(10,255,0,0.6)] border-2 border-white cursor-pointer" onClick={() => setTargetingItem(null)}>
+              <div className="flex flex-col items-start">
+                  <div className="flex items-center gap-2">
+                    <MousePointer2 size={24} /> 
+                    <span className="uppercase tracking-wider">{t.select_target}</span>
+                  </div>
+                  <span className="text-[10px] opacity-80 font-mono">
+                      {targetingItem.type === 'enemy' ? t.targets_enemy : t.targets_own}
+                  </span>
+              </div>
+              <div className="h-8 w-px bg-black/20"></div>
+              <div className="flex items-center gap-1 text-xs hover:bg-black/10 px-2 py-1 rounded">
+                  <XCircle size={16} /> {t.cancel}
+              </div>
           </div>
       )}
+
       {transferSource && (
-          <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[900] bg-blue-500/90 text-white px-4 py-2 rounded-full font-bold animate-pulse flex items-center gap-2 cursor-pointer" onClick={() => setTransferSource(null)}>
-              <MousePointer2 size={20} /> {t.select_transfer} (Click to Cancel)
+          <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[900] bg-blue-500/90 text-white px-6 py-3 rounded-full font-bold animate-pulse flex items-center gap-4 shadow-[0_0_30px_rgba(59,130,246,0.6)] border-2 border-white cursor-pointer" onClick={() => setTransferSource(null)}>
+              <div className="flex flex-col items-start">
+                 <div className="flex items-center gap-2">
+                    <MousePointer2 size={24} /> 
+                    <span className="uppercase tracking-wider">{t.select_transfer}</span>
+                 </div>
+              </div>
+              <div className="h-8 w-px bg-white/20"></div>
+              <div className="flex items-center gap-1 text-xs hover:bg-white/10 px-2 py-1 rounded">
+                  <XCircle size={16} /> {t.cancel}
+              </div>
           </div>
       )}
 

@@ -74,7 +74,7 @@ CREATE POLICY "Public Territories Access" ON territories FOR ALL USING (true) WI
 
 -- 5. Helper Functions (SECURITY DEFINER added to bypass RLS issues inside functions)
 
--- Purchase Item
+-- Purchase Item (FIXED: JSONB Handling)
 CREATE OR REPLACE FUNCTION purchase_item(
   player_id TEXT, 
   item_id TEXT, 
@@ -89,18 +89,26 @@ DECLARE
   current_inv JSONB;
   new_count INTEGER;
 BEGIN
-  SELECT money, inventory INTO current_money, current_inv FROM players WHERE id = player_id;
+  -- Explicitly cast inventory to ensure it is treated as JSONB
+  SELECT money, COALESCE(inventory::jsonb, '{}'::jsonb) INTO current_money, current_inv 
+  FROM players WHERE id = player_id;
   
   IF current_money IS NULL THEN 
      RETURN FALSE;
   END IF;
 
   IF current_money >= cost THEN
+    -- Deduct Money
     UPDATE players SET money = money - cost WHERE id = player_id;
+    
+    -- Calculate new count
     new_count := COALESCE((current_inv->>item_id)::INTEGER, 0) + 1;
+    
+    -- Update Inventory safely
     UPDATE players 
-    SET inventory = jsonb_set(COALESCE(inventory, '{}'::jsonb), ARRAY[item_id], to_jsonb(new_count))
+    SET inventory = jsonb_set(current_inv, ARRAY[item_id], to_jsonb(new_count))
     WHERE id = player_id;
+    
     RETURN TRUE;
   ELSE
     RETURN FALSE;
@@ -314,7 +322,15 @@ export const TRANSLATIONS = {
     item_bunker: 'Bunker (+50)',
     item_sabotage: 'Sabotar (-15)',
     item_airstrike: 'Ataque Aéreo (-50)',
-    item_stimpack: 'Estimulante (+50 Energia)'
+    item_stimpack: 'Estimulante (+50 Energia)',
+    cancel: 'Cancelar',
+    targets_own: 'Use em: Seus Territórios',
+    targets_enemy: 'Use em: Territórios Inimigos',
+    targets_player: 'Uso Instantâneo',
+    category_offense: 'Ataque',
+    category_defense: 'Defesa',
+    category_utility: 'Utilidade',
+    tab_all: 'Todos'
   },
   'en': {
     territories: 'Territories',
@@ -350,7 +366,15 @@ export const TRANSLATIONS = {
     item_bunker: 'Bunker (+50)',
     item_sabotage: 'Sabotage (-15)',
     item_airstrike: 'Airstrike (-50)',
-    item_stimpack: 'Stimpack (+50 Energy)'
+    item_stimpack: 'Stimpack (+50 Energy)',
+    cancel: 'Cancel',
+    targets_own: 'Target: Your Territories',
+    targets_enemy: 'Target: Enemy Territories',
+    targets_player: 'Instant Use',
+    category_offense: 'Offense',
+    category_defense: 'Defense',
+    category_utility: 'Utility',
+    tab_all: 'All'
   },
   'es': {
     territories: 'Territorios',
@@ -386,7 +410,15 @@ export const TRANSLATIONS = {
     item_bunker: 'Bunker (+50)',
     item_sabotage: 'Sabotaje (-15)',
     item_airstrike: 'Ataque Aéreo (-50)',
-    item_stimpack: 'Estimulante (+50 Energía)'
+    item_stimpack: 'Estimulante (+50 Energía)',
+    cancel: 'Cancelar',
+    targets_own: 'Objetivo: Tus Territorios',
+    targets_enemy: 'Objetivo: Enemigos',
+    targets_player: 'Uso Instantáneo',
+    category_offense: 'Ataque',
+    category_defense: 'Defensa',
+    category_utility: 'Utilidad',
+    tab_all: 'Todos'
   }
 };
 
@@ -397,7 +429,8 @@ export const SHOP_ITEMS = [
     cost: 50,
     effect: '+10 Strength',
     icon: 'UserPlus',
-    type: 'territory'
+    type: 'territory',
+    category: 'defense'
   },
   {
     id: 'fortify',
@@ -405,7 +438,8 @@ export const SHOP_ITEMS = [
     cost: 100,
     effect: '+20 Strength',
     icon: 'Shield',
-    type: 'territory'
+    type: 'territory',
+    category: 'defense'
   },
   {
     id: 'stimpack',
@@ -413,7 +447,8 @@ export const SHOP_ITEMS = [
     cost: 75,
     effect: '+50 Energy',
     icon: 'Zap',
-    type: 'player'
+    type: 'player',
+    category: 'utility'
   },
   {
     id: 'sabotage',
@@ -421,7 +456,8 @@ export const SHOP_ITEMS = [
     cost: 150,
     effect: '-15 Strength (Enemy)',
     icon: 'Skull',
-    type: 'enemy'
+    type: 'enemy',
+    category: 'offense'
   },
   {
     id: 'bunker',
@@ -429,7 +465,8 @@ export const SHOP_ITEMS = [
     cost: 300,
     effect: '+50 Strength',
     icon: 'ShieldCheck',
-    type: 'territory'
+    type: 'territory',
+    category: 'defense'
   },
   {
     id: 'airstrike',
@@ -437,6 +474,7 @@ export const SHOP_ITEMS = [
     cost: 500,
     effect: '-50 Strength (Enemy)',
     icon: 'Crosshair',
-    type: 'enemy'
+    type: 'enemy',
+    category: 'offense'
   }
 ];
