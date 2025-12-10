@@ -211,11 +211,21 @@ export class GameService {
 
   // --- Cloud Logic with SDK ---
 
-  private async waitForSdk(timeoutMs = 5000): Promise<boolean> {
+  private async waitForSdk(timeoutMs = 15000): Promise<boolean> {
     const start = Date.now();
+    
+    // Safety check: if the script is missing, inject it
+    if (!document.querySelector('script[src*="sqlitecloud"]')) {
+         console.warn("SQLiteCloud SDK script missing. Injecting fallback...");
+         const script = document.createElement('script');
+         script.src = "https://cdn.jsdelivr.net/npm/@sqlitecloud/drivers@1.0.126/dist/sqlitecloud.bundle.min.js";
+         script.async = true;
+         document.head.appendChild(script);
+    }
+
     while (Date.now() - start < timeoutMs) {
       if (window.sqlitecloud && window.sqlitecloud.Database) return true;
-      await new Promise(r => setTimeout(r, 100));
+      await new Promise(r => setTimeout(r, 200));
     }
     return false;
   }

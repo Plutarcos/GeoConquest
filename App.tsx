@@ -1,7 +1,4 @@
 
-
-
-
 import React, { useState, useEffect, useRef } from 'react';
 import { GameStatus, Player, GameState, Language, ShopItem, VisualEffect, ChatMessage } from './types';
 import { getUserLocation } from './services/geoService';
@@ -19,6 +16,7 @@ const App: React.FC = () => {
   const [username, setUsername] = useState('');
   const [player, setPlayer] = useState<Player | null>(null);
   const [language, setLanguage] = useState<Language>('pt-BR');
+  const [isInitializing, setIsInitializing] = useState(true);
   
   // Game State
   const [gameState, setGameState] = useState<GameState>({
@@ -66,6 +64,8 @@ const App: React.FC = () => {
        } catch (e) {
          console.error("DB Init critical fail", e);
          showToast("Connection Failed - Local Mode", 'error');
+       } finally {
+         setIsInitializing(false);
        }
     };
     init();
@@ -185,6 +185,8 @@ const App: React.FC = () => {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username) return;
+    if (isInitializing) return; // Guard
+
     try {
       const user = await gameService.login(username);
       setPlayer(user);
@@ -351,8 +353,17 @@ const App: React.FC = () => {
         />
       )}
 
+      {/* Initializing Spinner */}
+      {isInitializing && (
+         <div className="absolute inset-0 flex flex-col items-center justify-center z-[1100] bg-black/80 backdrop-blur-md">
+            <Loader2 className="animate-spin text-neon-blue mb-4" size={48} />
+            <div className="font-mono text-neon-blue animate-pulse tracking-widest">INITIALIZING UPLINK...</div>
+            <div className="text-xs text-gray-500 mt-2">Checking Neural Network Protocols</div>
+         </div>
+      )}
+
       {/* Login Screen */}
-      {status === GameStatus.LOGIN && (
+      {!isInitializing && status === GameStatus.LOGIN && (
         <div className="absolute inset-0 flex items-center justify-center z-[1000] pointer-events-auto bg-black/40 backdrop-blur-sm">
           <div className="bg-panel-bg p-8 rounded-2xl border border-neon-blue shadow-[0_0_50px_rgba(0,243,255,0.2)] max-w-md w-full mx-4 animate-in fade-in zoom-in duration-500">
             <h1 className="text-4xl font-bold text-center mb-2 bg-gradient-to-r from-neon-blue to-neon-green bg-clip-text text-transparent tracking-widest">
@@ -391,7 +402,7 @@ const App: React.FC = () => {
       )}
 
       {/* Setup Screen */}
-      {status === GameStatus.SETUP && (
+      {!isInitializing && status === GameStatus.SETUP && (
          <div className="absolute bottom-24 md:bottom-10 left-0 right-0 flex justify-center z-[1000] px-4 pointer-events-none">
            <div className="pointer-events-auto bg-panel-bg border border-neon-green/50 backdrop-blur-xl p-6 rounded-2xl shadow-2xl w-full max-w-lg flex flex-col gap-4 animate-in slide-in-from-bottom duration-500">
               <div className="flex items-start justify-between">
@@ -427,7 +438,7 @@ const App: React.FC = () => {
       )}
 
       {/* HUD */}
-      {status === GameStatus.PLAYING && player && (
+      {!isInitializing && status === GameStatus.PLAYING && player && (
         <HUD 
           player={player} 
           territories={gameState.territories} 
@@ -446,7 +457,7 @@ const App: React.FC = () => {
       )}
 
       {/* Shop */}
-      {showShop && player && (
+      {!isInitializing && showShop && player && (
         <Shop 
           language={language}
           currentMoney={player.money}
@@ -456,7 +467,7 @@ const App: React.FC = () => {
       )}
 
       {/* Chat */}
-      {status === GameStatus.PLAYING && player && (
+      {!isInitializing && status === GameStatus.PLAYING && player && (
          <Chat 
            messages={chatMessages}
            player={player}
