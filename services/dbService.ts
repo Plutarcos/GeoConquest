@@ -50,7 +50,13 @@ export class GameService {
   public async initDatabase() {
     console.log("Initializing Supabase...");
     try {
-      this.supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      this.supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: {
+            persistSession: false,
+            autoRefreshToken: false,
+            detectSessionInUrl: false
+        }
+      });
       
       // Test connection
       const { error } = await this.supabase.from('players').select('id').limit(1);
