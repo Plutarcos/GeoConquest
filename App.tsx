@@ -20,6 +20,9 @@ const App: React.FC = () => {
   const [language, setLanguage] = useState<Language>('pt-BR');
   const [isInitializing, setIsInitializing] = useState(true);
   
+  // Login UI state
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  
   // Game State
   const [gameState, setGameState] = useState<GameState>({
     territories: {},
@@ -72,7 +75,7 @@ const App: React.FC = () => {
          setIsInitializing(false);
     };
     init();
-  }, [showChat]); // Re-run if showChat changes is fine, but better to keep ref or simple state
+  }, [showChat]); 
 
   // Check for existing session
   useEffect(() => {
@@ -214,12 +217,14 @@ const App: React.FC = () => {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isInitializing) return;
+    if (isInitializing || isLoggingIn) return;
 
     let finalUsername = username.trim();
     if (!finalUsername) {
         finalUsername = `Guest_${Math.floor(Math.random()*9999)}`;
     }
+
+    setIsLoggingIn(true);
 
     try {
       const user = await gameService.login(finalUsername);
@@ -237,10 +242,11 @@ const App: React.FC = () => {
       }
 
       setStatus(GameStatus.SETUP);
-      // No local chat message addition needed, subscription handles it
     } catch (error: any) {
       console.error(error);
       setMessage(`ERROR: ${error.message || "Login failed"}`);
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -257,7 +263,6 @@ const App: React.FC = () => {
       await gameService.captureTerritory(player.id, gameState.selectedTerritoryId);
       setStatus(GameStatus.PLAYING);
       showToast(t.startConquest, 'success');
-      // No local chat addition needed
     } catch (e) {
       showToast("Error starting game", 'error');
     }
@@ -326,7 +331,6 @@ const App: React.FC = () => {
         if (source && source.ownerId === player.id) {
           if (!gameService.isAdjacent(source, clickedTerritory)) {
              showToast(t.error_adjacent, 'error');
-             // Visual Cue could go here (e.g., draw red line)
              return;
           }
 
@@ -338,14 +342,12 @@ const App: React.FC = () => {
             // Auto select conquered
             setGameState(prev => ({ ...prev, selectedTerritoryId: clickedId }));
           } else {
-             // Attack failed (Defense held)
              if (result.message && result.message.includes("Defense")) {
                 addVisualEffect("BLOCKED", clickedTerritory.lat, clickedTerritory.lng, 'damage');
              }
              showToast(result.message || "Attack failed", 'error');
           }
         } else {
-             // Selected was not mine, or null. Just change selection to target (to inspect it)
              setGameState(prev => ({ ...prev, selectedTerritoryId: clickedId }));
         }
       } else {
@@ -498,6 +500,7 @@ const App: React.FC = () => {
                   className="w-full bg-black/50 border border-gray-700 rounded-lg p-3 text-white focus:border-neon-blue focus:outline-none focus:shadow-[0_0_15px_rgba(0,243,255,0.3)] transition font-mono mb-2"
                   placeholder="CODENAME (Optional for Guest)"
                   maxLength={12}
+                  disabled={isLoggingIn}
                 />
               </div>
               
@@ -508,9 +511,21 @@ const App: React.FC = () => {
 
               <button 
                 type="submit"
-                className="w-full bg-neon-blue hover:bg-cyan-400 text-black font-bold py-3 rounded-lg shadow-lg shadow-cyan-500/20 transition transform hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2"
+                disabled={isLoggingIn}
+                className={`w-full font-bold py-3 rounded-lg shadow-lg shadow-cyan-500/20 transition transform hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2 ${
+                  isLoggingIn 
+                  ? 'bg-gray-700 text-gray-400 cursor-not-allowed' 
+                  : 'bg-neon-blue hover:bg-cyan-400 text-black'
+                }`}
               >
-                {username ? t.loginBtn : t.guestLogin}
+                {isLoggingIn ? (
+                  <>
+                     <Loader2 className="animate-spin" size={20} />
+                     Autenticando...
+                  </>
+                ) : (
+                  username ? t.loginBtn : t.guestLogin
+                )}
               </button>
               
               <div className="flex justify-center gap-4 text-sm text-gray-500 mt-4 border-t border-gray-800 pt-4">

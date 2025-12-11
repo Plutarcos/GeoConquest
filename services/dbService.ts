@@ -29,16 +29,27 @@ export class GameService {
     }
   }
 
-  // --- Helpers for Offline Mode ---
-  private getLocalData() {
-    const json = localStorage.getItem('geoconquest_offline_data');
-    if (!json) return { players: [], territories: [] };
-    const data = JSON.parse(json);
-    return data;
-  }
-
   public setChatCallback(cb: (msg: ChatMessage) => void) {
       this.chatCallback = cb;
+  }
+
+  // --- Helper to enforce timeout ---
+  private async withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+      return new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+              reject(new Error("Timeout"));
+          }, ms);
+
+          promise
+              .then(value => {
+                  clearTimeout(timer);
+                  resolve(value);
+              })
+              .catch(reason => {
+                  clearTimeout(timer);
+                  reject(reason);
+              });
+      });
   }
 
   // --- Supabase Init ---
@@ -51,13 +62,18 @@ export class GameService {
             persistSession: false,
             autoRefreshToken: false,
             detectSessionInUrl: false
+        },
+        global: {
+            headers: { 'x-application-name': 'geoconquest' }
         }
       });
       
-      // We assume connection is good initially, but failures in login/sync will flip this
+      // Test connection with a fast timeout (3s). If it fails, go offline immediately.
+      await this.withTimeout(this.supabase.from('players').select('count', { count: 'exact', head: true }), 3000);
+
       this.state.connected = true;
       this.offlineMode = false;
-      console.log("Supabase Client Initialized.");
+      console.log("Supabase Client Initialized & Connected.");
       
       // Subscribe to realtime changes
       this.supabase.channel('game_updates')
@@ -86,7 +102,7 @@ export class GameService {
         .subscribe();
 
     } catch (e) {
-      console.error("Supabase Initialization Failed:", e);
+      console.warn("Supabase Init Slow/Failed. Switching to Offline Mode.", e);
       this.offlineMode = true;
       this.state.connected = false;
     }
@@ -136,7 +152,10 @@ export class GameService {
         return createOfflinePlayer();
     }
 
-    try {
+    // Wrap the entire DB Login Logic in a separate function to race against timeout
+    const performDbLogin = async (): Promise<Player> => {
+        if (!this.supabase) throw new Error("No DB");
+
         // 1. Try to FIND the user first
         let { data, error } = await this.supabase
             .from('players')
@@ -144,13 +163,9 @@ export class GameService {
             .eq('id', id)
             .single();
 
-        // PGRST116 means "No rows found" (User doesn't exist yet)
-        if (error && error.code !== 'PGRST116') {
-            // Allow 406 to pass through as not found in some Supabase versions
-            if (error.code !== '406') {
-                console.error("Fetch Error:", error);
-                throw error; // Throwing here triggers catch block to switch to offline
-            }
+        // PGRST116 means "No rows found"
+        if (error && error.code !== 'PGRST116' && error.code !== '406') {
+             throw error;
         }
 
         // 2. If not found, CREATE the user
@@ -170,14 +185,10 @@ export class GameService {
                 .select()
                 .single();
             
-            if (createError) {
-                console.error("Create Error:", createError);
-                throw createError;
-            }
+            if (createError) throw createError;
             data = newData;
         }
 
-        // Return the user data
         return {
             id: data.id,
             username: data.username,
@@ -188,8 +199,14 @@ export class GameService {
             lastSeen: data.last_seen,
             inventory: data.inventory || {}
         };
+    };
+
+    try {
+        // RACE: Database vs 5 second Timer
+        // If Database is slow (cold start), we just let the user play offline.
+        return await this.withTimeout(performDbLogin(), 5000);
     } catch (e: any) {
-        console.warn("Connection failed during login. Switching to Offline Mode.", e);
+        console.warn("Login timed out or failed. Switching to Offline Mode.", e);
         this.offlineMode = true;
         this.state.connected = false;
         return createOfflinePlayer();
@@ -199,10 +216,9 @@ export class GameService {
   public async getUserTerritoryCount(playerId: string): Promise<number> {
       if (!this.supabase || this.offlineMode) return 0;
       try {
-        const { count, error } = await this.supabase.from('territories')
+        const { count } = await this.supabase.from('territories')
             .select('*', { count: 'exact', head: true })
             .eq('owner_id', playerId);
-        if (error) throw error;
         return count || 0;
       } catch (e) {
         return 0; // Fail gracefully
@@ -215,16 +231,15 @@ export class GameService {
     }
 
     try {
-        // Process Passive Growth (Server RPC Trigger)
+        // Process Passive Growth (Server RPC Trigger) - Fire and forget
         const now = Date.now();
         if (now - this.lastPassiveTick > 10000 && currentPlayerId) {
-            this.processPassiveGrowth(currentPlayerId);
-            this.lastPassiveTick = now;
+             this.supabase.rpc('passive_territory_growth', { player_id: currentPlayerId }).then(() => {});
+             this.lastPassiveTick = now;
         }
 
         // Fetch Players
-        const { data: playersData, error: playersError } = await this.supabase.from('players').select('*');
-        if (playersError) throw playersError;
+        const { data: playersData } = await this.supabase.from('players').select('*');
 
         const playersMap: Record<string, Player> = {};
         if (playersData) {
@@ -242,9 +257,8 @@ export class GameService {
             });
         }
 
-        // Fetch Territories in view (simplified to all for now)
-        const { data: terrData, error: terrError } = await this.supabase.from('territories').select('*');
-        if (terrError) throw terrError;
+        // Fetch Territories (Simplified View)
+        const { data: terrData } = await this.supabase.from('territories').select('*');
 
         const terrMap: Record<string, Territory> = {};
         if (terrData) {
@@ -265,8 +279,8 @@ export class GameService {
         this.state.connected = true;
 
     } catch (e) {
-        console.warn("Sync failed, entering offline mode", e);
-        this.offlineMode = true;
+        // Don't switch to offline immediately on sync fail, just mark disconnected temporarily
+        console.warn("Sync glitch", e);
         this.state.connected = false;
     }
 
@@ -319,12 +333,11 @@ export class GameService {
             }));
 
             if (newTerritories.length > 0) {
-                const { error: insertError } = await this.supabase.from('territories').insert(newTerritories);
-                if (insertError) console.warn("Grid gen insert error:", insertError);
+                await this.supabase.from('territories').insert(newTerritories);
             }
         } catch (e) {
-            console.warn("Grid initialization failed (Network)", e);
-            // Fallback: Generate local territories only in memory so the map isn't empty
+            console.warn("Grid initialization failed (Network). Using Local fallback.", e);
+            // Fallback: Generate local territories
             gridPoints.forEach(p => {
                 if (!this.state.territories[p.id]) {
                      this.state.territories[p.id] = {
@@ -353,15 +366,6 @@ export class GameService {
             }
         });
     }
-  }
-
-  private async processPassiveGrowth(playerId: string) {
-     if(!this.supabase || this.offlineMode) return;
-     try {
-         await this.supabase.rpc('passive_territory_growth', { player_id: playerId });
-     } catch (error) {
-         // Silently fail
-     }
   }
 
   private snapToGrid(val: number): number {
