@@ -1,19 +1,20 @@
 
 
 import React, { useState } from 'react';
-import { ShoppingCart, Shield, UserPlus, Skull, X, Zap, Crosshair, ShieldCheck, Filter } from 'lucide-react';
+import { ShoppingCart, Shield, UserPlus, Skull, X, Zap, Crosshair, ShieldCheck, Filter, Loader2 } from 'lucide-react';
 import { SHOP_ITEMS, TRANSLATIONS } from '../constants';
 import { Language, ShopItem } from '../types';
 
 interface ShopProps {
   language: Language;
   currentMoney: number;
-  onPurchase: (item: ShopItem) => void;
+  onPurchase: (item: ShopItem) => Promise<void>;
   onClose: () => void;
 }
 
 export const Shop: React.FC<ShopProps> = ({ language, currentMoney, onPurchase, onClose }) => {
   const [filter, setFilter] = useState<'all' | 'offense' | 'defense' | 'utility'>('all');
+  const [purchasingId, setPurchasingId] = useState<string | null>(null);
   const t = TRANSLATIONS[language];
 
   const getIcon = (iconName: string) => {
@@ -26,6 +27,12 @@ export const Shop: React.FC<ShopProps> = ({ language, currentMoney, onPurchase, 
       case 'ShieldCheck': return <ShieldCheck size={32} />;
       default: return <ShoppingCart size={32} />;
     }
+  };
+
+  const handleBuy = async (item: ShopItem) => {
+      setPurchasingId(item.id);
+      await onPurchase(item);
+      setPurchasingId(null);
   };
 
   const filteredItems = SHOP_ITEMS.filter(item => {
@@ -82,6 +89,8 @@ export const Shop: React.FC<ShopProps> = ({ language, currentMoney, onPurchase, 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredItems.map((item) => {
                const canAfford = currentMoney >= item.cost;
+               const isBuying = purchasingId === item.id;
+               
                return (
                 <div key={item.id} className={`group relative bg-black/40 border ${canAfford ? 'border-gray-700 hover:border-neon-blue' : 'border-red-900/30'} p-5 rounded-xl flex flex-col gap-3 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl`}>
                     
@@ -101,15 +110,15 @@ export const Shop: React.FC<ShopProps> = ({ language, currentMoney, onPurchase, 
 
                     <div className="mt-auto pt-4">
                         <button
-                            onClick={() => onPurchase(item as ShopItem)}
-                            disabled={!canAfford}
-                            className={`w-full py-3 rounded-lg font-bold text-xs uppercase tracking-widest transition-all ${
+                            onClick={() => handleBuy(item as ShopItem)}
+                            disabled={!canAfford || isBuying}
+                            className={`w-full py-3 rounded-lg font-bold text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${
                             canAfford 
                                 ? "bg-neon-blue text-black hover:bg-cyan-300 shadow-lg shadow-cyan-500/20 active:scale-95" 
                                 : "bg-gray-800 text-gray-500 cursor-not-allowed border border-gray-700"
                             }`}
                         >
-                            {canAfford ? t.buy : 'Insuficiente'}
+                            {isBuying ? <Loader2 className="animate-spin" size={16} /> : (canAfford ? t.buy : 'Insuficiente')}
                         </button>
                     </div>
                 </div>

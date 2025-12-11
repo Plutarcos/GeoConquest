@@ -122,7 +122,7 @@ const HUD: React.FC<HUDProps> = ({
 
       {/* --- Territory Command Bar (Contextual) --- */}
       {selectedTerritory && isSelectedMine && (
-        <div className="absolute bottom-32 md:bottom-28 left-1/2 -translate-x-1/2 z-[500] pointer-events-auto animate-in slide-in-from-bottom-4 w-max">
+        <div className="absolute bottom-40 md:bottom-28 left-1/2 -translate-x-1/2 z-[500] pointer-events-auto animate-in slide-in-from-bottom-4 w-max">
            <div className="bg-panel-bg border border-neon-blue/50 rounded-xl p-2 px-4 shadow-lg flex items-center gap-3">
                <span className="text-neon-blue font-bold text-sm border-r border-gray-600 pr-3">{selectedTerritory.name}</span>
                

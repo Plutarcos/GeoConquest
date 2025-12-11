@@ -34,6 +34,8 @@ export const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiO
 
 // SQL Commands Reference
 export const SQL_INIT_COMMANDS = `
+-- COPY THIS INTO SUPABASE SQL EDITOR TO FIX ALL ISSUES
+
 -- 1. Create Players Table
 CREATE TABLE IF NOT EXISTS players (
     id TEXT PRIMARY KEY,
@@ -55,7 +57,7 @@ CREATE TABLE IF NOT EXISTS territories (
     lng FLOAT NOT NULL
 );
 
--- 3. Create Messages Table (NEW)
+-- 3. Create Messages Table
 CREATE TABLE IF NOT EXISTS messages (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     sender TEXT NOT NULL,
@@ -79,7 +81,7 @@ CREATE POLICY "Public Messages Access" ON messages FOR ALL USING (true) WITH CHE
 
 -- 6. Helper Functions
 
--- Purchase Item (FIXED v2)
+-- Purchase Item (FIXED v3 - Extreme Durability)
 CREATE OR REPLACE FUNCTION purchase_item(
   player_id TEXT, 
   item_id TEXT, 
@@ -94,20 +96,22 @@ DECLARE
   current_inv JSONB;
   new_count INTEGER;
 BEGIN
-  SELECT money, COALESCE(inventory, '{}'::jsonb) INTO current_money, current_inv 
+  -- We cast inventory to jsonb explicitly to avoid type errors if it's text or json
+  SELECT money, COALESCE(inventory::jsonb, '{}'::jsonb) INTO current_money, current_inv 
   FROM players WHERE id = player_id;
   
+  -- Check funds
   IF current_money IS NULL OR current_money < cost THEN 
      RETURN FALSE;
   END IF;
 
-  -- Update Money
+  -- Deduct Money
   UPDATE players SET money = money - cost WHERE id = player_id;
   
-  -- Calculate new count
+  -- Calculate new count safe extraction
   new_count := COALESCE((current_inv->>item_id)::INTEGER, 0) + 1;
   
-  -- Update Inventory
+  -- Update Inventory using jsonb_set
   UPDATE players 
   SET inventory = jsonb_set(current_inv, ARRAY[item_id], to_jsonb(new_count))
   WHERE id = player_id;
