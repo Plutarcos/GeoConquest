@@ -118,6 +118,16 @@ export class GameService {
               ownerId: t.owner_id,
               strength: t.strength
           };
+      } else {
+          // If we receive an update for a territory we don't have yet, add it
+          this.state.territories[t.id] = {
+              id: t.id,
+              name: t.name,
+              ownerId: t.owner_id,
+              strength: t.strength,
+              lat: t.lat,
+              lng: t.lng
+          };
       }
   }
 
@@ -273,7 +283,6 @@ export class GameService {
         // Fetch Players
         const { data: playersData } = await this.supabase.from('players').select('*');
 
-        const playersMap: Record<string, Player> = {};
         if (playersData) {
             playersData.forEach((p: any) => {
                 let inv = p.inventory || {};
@@ -281,7 +290,8 @@ export class GameService {
                     try { inv = JSON.parse(inv); } catch (e) { inv = {}; }
                 }
 
-                playersMap[p.id] = {
+                // Merge / Update
+                this.state.players[p.id] = {
                     id: p.id,
                     username: p.username,
                     color: p.color,
@@ -297,10 +307,10 @@ export class GameService {
         // Fetch Territories (Simplified View)
         const { data: terrData } = await this.supabase.from('territories').select('*');
 
-        const terrMap: Record<string, Territory> = {};
         if (terrData) {
             terrData.forEach((t: any) => {
-                terrMap[t.id] = {
+                // Merge / Update
+                this.state.territories[t.id] = {
                     id: t.id,
                     name: t.name,
                     ownerId: t.owner_id,
@@ -311,8 +321,6 @@ export class GameService {
             });
         }
 
-        this.state.players = playersMap;
-        this.state.territories = terrMap;
         this.state.connected = true;
 
     } catch (e) {
@@ -342,10 +350,9 @@ export class GameService {
         const snappedLng = this.snapToGrid(lng);
         const name = `Sector ${id.replace('_', ':')}`;
         
-        if (!this.state.territories[id]) {
-            idsToFetch.push(id);
-            gridPoints.push({ lat: snappedLat, lng: snappedLng, id, name });
-        }
+        // We always fetch if it's near, to ensure we get updates for things we might have locally but are stale
+        idsToFetch.push(id);
+        gridPoints.push({ lat: snappedLat, lng: snappedLng, id, name });
       }
     }
 
@@ -356,6 +363,20 @@ export class GameService {
             const { data, error } = await this.supabase.from('territories').select('*').in('id', idsToFetch);
             
             if (error) throw error;
+
+            // FIX: Immediately update local state with existing data found in DB
+            if (data) {
+                data.forEach((t: any) => {
+                    this.state.territories[t.id] = {
+                        id: t.id,
+                        name: t.name,
+                        ownerId: t.owner_id,
+                        strength: t.strength,
+                        lat: t.lat,
+                        lng: t.lng
+                    };
+                });
+            }
 
             const existingIds = new Set((data || []).map((t: any) => t.id));
 
@@ -371,6 +392,17 @@ export class GameService {
 
             if (newTerritories.length > 0) {
                 await this.supabase.from('territories').insert(newTerritories);
+                // Also add these new ones to local state immediately
+                newTerritories.forEach(nt => {
+                    this.state.territories[nt.id] = {
+                        id: nt.id,
+                        name: nt.name,
+                        ownerId: null,
+                        strength: nt.strength,
+                        lat: nt.lat,
+                        lng: nt.lng
+                    };
+                });
             }
         } catch (e) {
             console.warn("Grid initialization failed (Network). Using Local fallback.", e);
