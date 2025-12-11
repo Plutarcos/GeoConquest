@@ -58,24 +58,26 @@ const App: React.FC = () => {
 
   const t = TRANSLATIONS[language];
 
-  // Initialize DB
+  // 1. Initialize DB (Run Once)
   useEffect(() => {
     const init = async () => {
-         // Setup Chat Callback before Init
-         gameService.setChatCallback((msg) => {
-             setChatMessages(prev => {
-                 // Prevent dupes
-                 if (prev.some(p => p.id === msg.id)) return prev;
-                 return [...prev, msg].slice(-50); // Keep last 50
-             });
-             if (!showChat) setHasUnread(true);
-         });
-
          await gameService.initDatabase();
          setIsInitializing(false);
     };
     init();
-  }, [showChat]); 
+  }, []);
+
+  // 2. Setup Chat Callback (Run when showChat changes)
+  useEffect(() => {
+     gameService.setChatCallback((msg) => {
+         setChatMessages(prev => {
+             // Prevent dupes
+             if (prev.some(p => p.id === msg.id)) return prev;
+             return [...prev, msg].slice(-50); // Keep last 50
+         });
+         if (!showChat) setHasUnread(true);
+     });
+  }, [showChat]);
 
   // Check for existing session
   useEffect(() => {
@@ -96,8 +98,12 @@ const App: React.FC = () => {
       const interval = setInterval(async () => {
         const syncedState = await gameService.syncState(player?.id || null);
         
-        // Permadeath Check
-        if (player && syncedState.players && !syncedState.players[player.id]) {
+        // Permadeath Check - FIXED RACE CONDITION
+        // Only trigger death if:
+        // 1. We are CONNECTED (online)
+        // 2. We have received a valid player list from the server (length > 0)
+        // 3. Our player ID is definitely NOT in that list
+        if (gameState.connected && player && syncedState.players && Object.keys(syncedState.players).length > 0 && !syncedState.players[player.id]) {
            showToast("FATAL ERROR: SIGNAL LOST. BASE DESTROYED.", 'error');
            localStorage.removeItem('geoconquest_user');
            setTimeout(() => window.location.reload(), 3000);
@@ -128,7 +134,7 @@ const App: React.FC = () => {
       }, 2000);
       return () => clearInterval(interval);
     }
-  }, [status, player]);
+  }, [status, player, gameState.connected]);
 
   // Setup Phase: Auto-locate and Check if new or returning
   useEffect(() => {

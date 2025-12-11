@@ -34,27 +34,30 @@ export class GameService {
   }
 
   // --- Helper to enforce timeout ---
-  private async withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  private async withTimeout<T>(promise: PromiseLike<T>, ms: number): Promise<T> {
       return new Promise((resolve, reject) => {
           const timer = setTimeout(() => {
               reject(new Error("Timeout"));
           }, ms);
 
-          promise
-              .then(value => {
+          promise.then(
+              (value) => {
                   clearTimeout(timer);
                   resolve(value);
-              })
-              .catch(reason => {
+              },
+              (reason) => {
                   clearTimeout(timer);
                   reject(reason);
-              });
+              }
+          );
       });
   }
 
   // --- Supabase Init ---
 
   public async initDatabase() {
+    if (this.supabase) return; // Prevent double init
+
     console.log("Initializing Supabase...");
     try {
       this.supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -119,12 +122,30 @@ export class GameService {
   }
 
   private updateLocalPlayer(p: any) {
+      // Ensure we treat inventory as an object even if DB sends string
+      let inv = p.inventory || {};
+      if (typeof inv === 'string') {
+          try { inv = JSON.parse(inv); } catch (e) { inv = {}; }
+      }
+
       if (this.state.players[p.id]) {
           this.state.players[p.id] = {
               ...this.state.players[p.id],
               money: Number(p.money),
               energy: Number(p.energy),
-              inventory: p.inventory || {}
+              inventory: inv
+          };
+      } else {
+          // New player detected via realtime
+          this.state.players[p.id] = {
+            id: p.id,
+            username: p.username,
+            color: p.color,
+            money: Number(p.money),
+            energy: Number(p.energy),
+            maxEnergy: 100,
+            lastSeen: p.last_seen,
+            inventory: inv
           };
       }
   }
@@ -149,7 +170,9 @@ export class GameService {
     });
 
     if (this.offlineMode || !this.supabase) {
-        return createOfflinePlayer();
+        const p = createOfflinePlayer();
+        this.state.players[p.id] = p; // IMPORTANT: Add to local state
+        return p;
     }
 
     // Wrap the entire DB Login Logic in a separate function to race against timeout
@@ -189,6 +212,11 @@ export class GameService {
             data = newData;
         }
 
+        let inv = data.inventory || {};
+        if (typeof inv === 'string') {
+            try { inv = JSON.parse(inv); } catch (e) { inv = {}; }
+        }
+
         return {
             id: data.id,
             username: data.username,
@@ -197,19 +225,23 @@ export class GameService {
             energy: Number(data.energy),
             maxEnergy: 100,
             lastSeen: data.last_seen,
-            inventory: data.inventory || {}
+            inventory: inv
         };
     };
 
     try {
         // RACE: Database vs 5 second Timer
         // If Database is slow (cold start), we just let the user play offline.
-        return await this.withTimeout(performDbLogin(), 5000);
+        const p = await this.withTimeout(performDbLogin(), 5000);
+        this.state.players[p.id] = p; // IMPORTANT: Add to local state immediately
+        return p;
     } catch (e: any) {
         console.warn("Login timed out or failed. Switching to Offline Mode.", e);
         this.offlineMode = true;
         this.state.connected = false;
-        return createOfflinePlayer();
+        const p = createOfflinePlayer();
+        this.state.players[p.id] = p; // IMPORTANT: Add to local state
+        return p;
     }
   }
 
@@ -244,6 +276,11 @@ export class GameService {
         const playersMap: Record<string, Player> = {};
         if (playersData) {
             playersData.forEach((p: any) => {
+                let inv = p.inventory || {};
+                if (typeof inv === 'string') {
+                    try { inv = JSON.parse(inv); } catch (e) { inv = {}; }
+                }
+
                 playersMap[p.id] = {
                     id: p.id,
                     username: p.username,
@@ -252,7 +289,7 @@ export class GameService {
                     energy: Number(p.energy),
                     maxEnergy: 100,
                     lastSeen: p.last_seen,
-                    inventory: p.inventory || {}
+                    inventory: inv
                 };
             });
         }
@@ -488,10 +525,14 @@ export class GameService {
 
              const currentMoney = Number(player.money);
              if (currentMoney < cost) return { success: false, message: "Fundos insuficientes" };
+             
+             let currentInv = player.inventory || {};
+             if (typeof currentInv === 'string') {
+                 try { currentInv = JSON.parse(currentInv); } catch (e) { currentInv = {}; }
+             }
 
-             const inventory = player.inventory || {};
-             const currentCount = (inventory[itemId] || 0);
-             const newInventory = { ...inventory, [itemId]: currentCount + 1 };
+             const currentCount = (currentInv[itemId] || 0);
+             const newInventory = { ...currentInv, [itemId]: currentCount + 1 };
 
              const updates = {
                  money: currentMoney - cost,
