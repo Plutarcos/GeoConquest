@@ -22,6 +22,7 @@ const App: React.FC = () => {
   
   // Login UI state
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isClaiming, setIsClaiming] = useState(false);
   
   // Game State
   const [gameState, setGameState] = useState<GameState>({
@@ -99,11 +100,7 @@ const App: React.FC = () => {
         const syncedState = await gameService.syncState(player?.id || null);
         
         // Permadeath Check - FIXED RACE CONDITION
-        // Only trigger death if:
-        // 1. We are CONNECTED (online)
-        // 2. We have received a valid player list from the server (length > 0)
-        // 3. Our player ID is definitely NOT in that list
-        if (gameState.connected && player && syncedState.players && Object.keys(syncedState.players).length > 0 && !syncedState.players[player.id]) {
+        if (status === GameStatus.PLAYING && gameState.connected && player && syncedState.players && Object.keys(syncedState.players).length > 0 && !syncedState.players[player.id]) {
            showToast("FATAL ERROR: SIGNAL LOST. BASE DESTROYED.", 'error');
            localStorage.removeItem('geoconquest_user');
            setTimeout(() => window.location.reload(), 3000);
@@ -257,20 +254,33 @@ const App: React.FC = () => {
   };
 
   const handleStartGame = async () => {
-    if (!player || !gameState.selectedTerritoryId) return;
+    if (!player || !gameState.selectedTerritoryId || isClaiming) return;
+    setIsClaiming(true);
 
     const tStart = gameState.territories[gameState.selectedTerritoryId];
     if (tStart && tStart.ownerId && tStart.ownerId !== player.id) {
         showToast(t.error_occupied, 'error');
+        setIsClaiming(false);
         return;
     }
 
     try {
-      await gameService.captureTerritory(player.id, gameState.selectedTerritoryId);
-      setStatus(GameStatus.PLAYING);
-      showToast(t.startConquest, 'success');
+      // Secure Claim Check
+      const success = await gameService.claimTerritory(player.id, gameState.selectedTerritoryId);
+      
+      if (success) {
+        setStatus(GameStatus.PLAYING);
+        showToast(t.startConquest, 'success');
+      } else {
+        showToast(t.error_occupied, 'error');
+        // Refresh state immediately to show the actual owner
+        const latest = await gameService.syncState(player.id);
+        setGameState(prev => ({ ...prev, ...latest }));
+      }
     } catch (e) {
       showToast("Error starting game", 'error');
+    } finally {
+        setIsClaiming(false);
     }
   };
 
@@ -567,14 +577,14 @@ const App: React.FC = () => {
 
               <button 
                  onClick={handleStartGame}
-                 disabled={!gameState.selectedTerritoryId}
+                 disabled={!gameState.selectedTerritoryId || isClaiming}
                  className={`w-full py-4 rounded-lg font-bold text-lg flex items-center justify-center gap-2 transition-all ${
-                    gameState.selectedTerritoryId 
+                    gameState.selectedTerritoryId && !isClaiming
                     ? "bg-neon-green text-black hover:bg-green-400 shadow-lg shadow-green-500/20 transform hover:scale-[1.02]" 
                     : "bg-gray-800 text-gray-500 cursor-not-allowed"
                  }`}
               >
-                <Play size={20} fill="currentColor" /> {t.startConquest}
+                 {isClaiming ? <Loader2 className="animate-spin" size={20} /> : <Play size={20} fill="currentColor" />} {t.startConquest}
               </button>
            </div>
          </div>
