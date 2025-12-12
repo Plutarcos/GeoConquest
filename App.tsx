@@ -42,7 +42,7 @@ const App: React.FC = () => {
   const [showShop, setShowShop] = useState(false);
   const [showInventory, setShowInventory] = useState(false);
   const [showChat, setShowChat] = useState(false);
-  const [zoomLevel, setZoomLevel] = useState(16);
+  const [zoomLevel, setZoomLevel] = useState(17);
   const [recenterTrigger, setRecenterTrigger] = useState(0); 
   const [visualEffects, setVisualEffects] = useState<VisualEffect[]>([]);
   
@@ -155,6 +155,7 @@ const App: React.FC = () => {
                     centerLat: loc.lat,
                     centerLng: loc.lng 
                    }));
+                   setZoomLevel(17);
                    setRecenterTrigger(prev => prev + 1);
                    setStatus(GameStatus.PLAYING);
                    showToast(`Welcome back, Commander. You own ${ownedCount} sectors.`, 'success');
@@ -171,6 +172,7 @@ const App: React.FC = () => {
              centerLng: loc.lng,
              selectedTerritoryId: myTerritoryId 
            }));
+           setZoomLevel(17);
            setRecenterTrigger(prev => prev + 1);
            showToast(t.located, 'success');
         })
@@ -271,6 +273,7 @@ const App: React.FC = () => {
       if (success) {
         setStatus(GameStatus.PLAYING);
         showToast(t.startConquest, 'success');
+        if (tStart) addVisualEffect("BASE ESTABLISHED", tStart.lat, tStart.lng, 'heal');
       } else {
         showToast(t.error_occupied, 'error');
         // Refresh state immediately to show the actual owner
@@ -301,7 +304,10 @@ const App: React.FC = () => {
         showToast(result.message, result.success ? 'success' : 'error');
         if (result.success) {
             setTargetingItem(null);
-            addVisualEffect("ITEM USED", clickedTerritory.lat, clickedTerritory.lng, 'info');
+            addVisualEffect("TACTICAL STRIKE", clickedTerritory.lat, clickedTerritory.lng, 'info');
+            // Refresh visuals
+            const latest = await gameService.syncState(player.id);
+            setGameState(prev => ({...prev, ...latest}));
         }
         return;
     }
@@ -327,7 +333,7 @@ const App: React.FC = () => {
             showToast(result.message, result.success ? 'success' : 'error');
             if (result.success) {
                 setTransferSource(null);
-                addVisualEffect(`moved ${amount}`, clickedTerritory.lat, clickedTerritory.lng, 'heal');
+                addVisualEffect(`REINFORCE +${amount}`, clickedTerritory.lat, clickedTerritory.lng, 'heal');
             }
         }
         return;
@@ -354,12 +360,14 @@ const App: React.FC = () => {
           
           if (result.success) {
             addVisualEffect("VICTORY", clickedTerritory.lat, clickedTerritory.lng, 'heal');
-            addVisualEffect("-1", source.lat, source.lng, 'info');
+            addVisualEffect("CONQUERED", clickedTerritory.lat, clickedTerritory.lng, 'info');
             // Auto select conquered
             setGameState(prev => ({ ...prev, selectedTerritoryId: clickedId }));
           } else {
-             if (result.message && result.message.includes("Defense")) {
+             if (result.message && result.message.includes("Defesa")) {
                 addVisualEffect("BLOCKED", clickedTerritory.lat, clickedTerritory.lng, 'damage');
+             } else {
+                addVisualEffect("FAILED", clickedTerritory.lat, clickedTerritory.lng, 'damage');
              }
              showToast(result.message || "Attack failed", 'error');
           }
@@ -375,11 +383,23 @@ const App: React.FC = () => {
   const handlePurchase = async (item: ShopItem) => {
     if (!player) return;
     const result = await gameService.purchaseItem(player.id, item.id, item.cost);
-    showToast(result.message, result.success ? 'success' : 'error');
     
     if (result.success) {
-      const newState = await gameService.syncState(player.id);
-      setGameState(prev => ({ ...prev, ...newState }));
+      showToast(result.message, 'success');
+      // Update local player state for instant money update visible in Shop
+      setPlayer(prev => {
+          if(!prev) return null;
+          return {
+              ...prev,
+              money: prev.money - item.cost,
+              inventory: {
+                  ...prev.inventory,
+                  [item.id]: (prev.inventory[item.id] || 0) + 1
+              }
+          }
+      });
+    } else {
+        showToast(result.message, 'error');
     }
   };
 
@@ -389,6 +409,11 @@ const App: React.FC = () => {
           gameService.useItem(player!.id, itemId).then(res => {
              showToast(res.message, res.success ? 'success' : 'error');
              setShowInventory(false);
+             if (res.success && player && userRealLocation.current) {
+                 addVisualEffect("ENERGY BOOST", userRealLocation.current.lat, userRealLocation.current.lng, 'heal');
+                 // Sync instantly
+                 gameService.syncState(player.id).then(newState => setGameState(prev => ({...prev, ...newState})));
+             }
           });
       } else {
           // Enter targeting mode
@@ -410,7 +435,7 @@ const App: React.FC = () => {
          centerLat: userRealLocation.current!.lat, 
          centerLng: userRealLocation.current!.lng 
        }));
-       setZoomLevel(16);
+       setZoomLevel(17);
        setRecenterTrigger(prev => prev + 1);
        return;
     }
@@ -418,6 +443,7 @@ const App: React.FC = () => {
        const t = gameState.territories[gameState.selectedTerritoryId];
        if (t) {
          setGameState(prev => ({ ...prev, centerLat: t.lat, centerLng: t.lng }));
+         setZoomLevel(17);
          setRecenterTrigger(prev => prev + 1);
        }
     }
@@ -447,7 +473,7 @@ const App: React.FC = () => {
 
       {/* Target Mode Overlay HUD */}
       {targetingItem && (
-          <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[900] bg-neon-green/90 text-black px-6 py-3 rounded-full font-bold animate-pulse flex items-center gap-4 shadow-[0_0_30px_rgba(10,255,0,0.6)] border-2 border-white cursor-pointer" onClick={() => setTargetingItem(null)}>
+          <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[900] bg-neon-green/90 text-black px-6 py-3 rounded-full font-bold animate-pulse-fast flex items-center gap-4 shadow-[0_0_30px_rgba(10,255,0,0.6)] border-2 border-white cursor-pointer" onClick={() => setTargetingItem(null)}>
               <div className="flex flex-col items-start">
                   <div className="flex items-center gap-2">
                     <MousePointer2 size={24} /> 
@@ -499,45 +525,47 @@ const App: React.FC = () => {
 
       {/* Login Screen */}
       {!isInitializing && status === GameStatus.LOGIN && (
-        <div className="absolute inset-0 flex items-center justify-center z-[1000] pointer-events-auto bg-black/40 backdrop-blur-sm">
-          <div className="bg-panel-bg p-8 rounded-2xl border border-neon-blue shadow-[0_0_50px_rgba(0,243,255,0.2)] max-w-md w-full mx-4 animate-in fade-in zoom-in duration-500">
-            <h1 className="text-4xl font-bold text-center mb-2 bg-gradient-to-r from-neon-blue to-neon-green bg-clip-text text-transparent tracking-widest">
+        <div className="absolute inset-0 flex items-center justify-center z-[1000] pointer-events-auto bg-black/60 backdrop-blur-md">
+          <div className="bg-panel-bg p-8 rounded-2xl border border-neon-blue shadow-[0_0_80px_rgba(0,243,255,0.2)] max-w-md w-full mx-4 animate-in fade-in zoom-in duration-500 relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-neon-blue via-neon-purple to-neon-blue animate-glitch"></div>
+            
+            <h1 className="text-5xl font-black text-center mb-2 text-white tracking-widest uppercase italic drop-shadow-[0_0_10px_rgba(0,243,255,0.8)]">
               {t.gameTitle}
             </h1>
-            <p className="text-gray-400 text-center mb-8 font-mono text-xs">{t.subTitle}</p>
+            <p className="text-neon-blue/80 text-center mb-8 font-mono text-xs uppercase tracking-[0.2em]">{t.subTitle}</p>
             
             <form onSubmit={handleLogin} className="space-y-6">
               <div>
-                <label className="block text-xs uppercase tracking-wider text-gray-500 mb-1">{t.loginPrompt}</label>
+                <label className="block text-xs uppercase tracking-wider text-gray-500 mb-1 font-bold">{t.loginPrompt}</label>
                 <input 
                   type="text" 
                   value={username}
                   onChange={e => setUsername(e.target.value)}
-                  className="w-full bg-black/50 border border-gray-700 rounded-lg p-3 text-white focus:border-neon-blue focus:outline-none focus:shadow-[0_0_15px_rgba(0,243,255,0.3)] transition font-mono mb-2"
-                  placeholder="CODENAME (Optional for Guest)"
+                  className="w-full bg-black/50 border border-gray-700 rounded-none p-4 text-white focus:border-neon-blue focus:outline-none focus:shadow-[0_0_15px_rgba(0,243,255,0.3)] transition font-mono mb-2 tracking-wider text-lg"
+                  placeholder="AGENT ID..."
                   maxLength={12}
                   disabled={isLoggingIn}
                 />
               </div>
               
-              <div className="bg-red-900/30 border border-red-500/50 p-2 rounded text-[10px] text-gray-300 flex items-start gap-2">
-                 <AlertTriangle size={14} className="text-red-500 shrink-0 mt-0.5" />
+              <div className="bg-red-900/20 border border-red-500/30 p-3 rounded text-[10px] text-red-200 flex items-start gap-3">
+                 <AlertTriangle size={16} className="text-red-500 shrink-0 mt-0.5 animate-pulse" />
                  {t.permadeathWarn}
               </div>
 
               <button 
                 type="submit"
                 disabled={isLoggingIn}
-                className={`w-full font-bold py-3 rounded-lg shadow-lg shadow-cyan-500/20 transition transform hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2 ${
+                className={`w-full font-bold py-4 rounded-none uppercase tracking-[0.2em] transition-all transform hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2 ${
                   isLoggingIn 
-                  ? 'bg-gray-700 text-gray-400 cursor-not-allowed' 
-                  : 'bg-neon-blue hover:bg-cyan-400 text-black'
+                  ? 'bg-gray-800 text-gray-400 cursor-not-allowed border border-gray-700' 
+                  : 'bg-neon-blue hover:bg-white text-black shadow-[0_0_20px_rgba(0,243,255,0.4)] hover:shadow-[0_0_30px_rgba(0,243,255,0.8)]'
                 }`}
               >
                 {isLoggingIn ? (
                   <>
                      <Loader2 className="animate-spin" size={20} />
-                     Autenticando...
+                     Authenticating...
                   </>
                 ) : (
                   username ? t.loginBtn : t.guestLogin
@@ -557,13 +585,15 @@ const App: React.FC = () => {
       {/* Setup Screen */}
       {!isInitializing && status === GameStatus.SETUP && (
          <div className="absolute bottom-24 md:bottom-10 left-0 right-0 flex justify-center z-[1000] px-4 pointer-events-none">
-           <div className="pointer-events-auto bg-panel-bg border border-neon-green/50 backdrop-blur-xl p-6 rounded-2xl shadow-2xl w-full max-w-lg flex flex-col gap-4 animate-in slide-in-from-bottom duration-500">
+           <div className="pointer-events-auto bg-panel-bg border border-neon-green/50 backdrop-blur-xl p-6 rounded-2xl shadow-[0_0_50px_rgba(10,255,0,0.2)] w-full max-w-lg flex flex-col gap-4 animate-in slide-in-from-bottom duration-500 relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-1 bg-neon-green/50 animate-pulse"></div>
+              
               <div className="flex items-start justify-between">
                 <div>
-                   <h2 className="text-neon-green font-bold text-xl flex items-center gap-2">
+                   <h2 className="text-neon-green font-bold text-xl flex items-center gap-2 uppercase tracking-wider">
                      <MapPin size={24} /> {t.selectBase}
                    </h2>
-                   <p className="text-gray-400 text-sm mt-1">
+                   <p className="text-gray-400 text-sm mt-1 font-mono">
                      {isLocating ? t.scanning : t.selectBaseDesc}
                    </p>
                 </div>
@@ -578,13 +608,13 @@ const App: React.FC = () => {
               <button 
                  onClick={handleStartGame}
                  disabled={!gameState.selectedTerritoryId || isClaiming}
-                 className={`w-full py-4 rounded-lg font-bold text-lg flex items-center justify-center gap-2 transition-all ${
+                 className={`w-full py-4 rounded-lg font-bold text-lg flex items-center justify-center gap-2 transition-all uppercase tracking-widest ${
                     gameState.selectedTerritoryId && !isClaiming
-                    ? "bg-neon-green text-black hover:bg-green-400 shadow-lg shadow-green-500/20 transform hover:scale-[1.02]" 
-                    : "bg-gray-800 text-gray-500 cursor-not-allowed"
+                    ? "bg-neon-green text-black hover:bg-white shadow-[0_0_20px_rgba(10,255,0,0.4)] transform hover:scale-[1.02]" 
+                    : "bg-gray-800 text-gray-500 cursor-not-allowed border border-gray-700"
                  }`}
               >
-                 {isClaiming ? <Loader2 className="animate-spin" size={20} /> : <Play size={20} fill="currentColor" />} {t.startConquest}
+                 {isClaiming ? <Loader2 className="animate-spin" size={24} /> : <Play size={24} fill="currentColor" />} {t.startConquest}
               </button>
            </div>
          </div>
@@ -647,16 +677,16 @@ const App: React.FC = () => {
       {/* Notifications */}
       {message && (
         <div className="absolute top-24 left-1/2 -translate-x-1/2 pointer-events-none z-[1100] w-max max-w-[90vw] animate-in slide-in-from-top-4 fade-in duration-300">
-           <div className={`backdrop-blur-md border px-6 py-3 rounded-full shadow-[0_0_20px_rgba(0,0,0,0.5)] flex items-center gap-3 ${
+           <div className={`backdrop-blur-md border px-8 py-4 rounded-none shadow-[0_0_30px_rgba(0,0,0,0.8)] flex items-center gap-4 ${
              message.includes("Error") || message.includes("Offline") || message.includes("Failed") || message.includes("!")
-             ? 'bg-red-900/80 border-red-500 text-white' 
-             : 'bg-black/80 border-neon-blue/30 text-white'
+             ? 'bg-red-900/90 border-red-500 text-white' 
+             : 'bg-black/90 border-neon-blue text-white'
            }`}>
-              {message.includes("Online") || message.includes("Connected") ? <Wifi size={20} className="text-neon-green" /> : 
-               message.includes("Offline") ? <WifiOff size={20} className="text-red-400" /> :
-               <Crosshair size={20} className="text-neon-blue" />
+              {message.includes("Online") || message.includes("Connected") ? <Wifi size={24} className="text-neon-green" /> : 
+               message.includes("Offline") ? <WifiOff size={24} className="text-red-400" /> :
+               <Crosshair size={24} className="text-neon-blue" />
               }
-              <span className="font-mono text-sm tracking-wide">{message}</span>
+              <span className="font-mono text-base tracking-widest uppercase font-bold">{message}</span>
            </div>
         </div>
       )}

@@ -365,13 +365,10 @@ export class GameService {
             .select();
 
         if (error || !data || data.length === 0) {
-            // It failed, likely because owner_id was not null (already claimed)
-            // Double check to update local state
             await this.syncState(playerId);
             return false;
         }
 
-        // Success
         await this.generateNeighbors(this.state.territories[territoryId].lat, this.state.territories[territoryId].lng);
         return true;
 
@@ -431,18 +428,47 @@ export class GameService {
   }
 
   public async purchaseItem(playerId: string, itemId: string, cost: number): Promise<{success: boolean, message: string}> {
-      if (this.offlineMode || !this.supabase) return this.offlinePurchase(playerId, itemId, cost);
+      // 1. Check Offline
+      if (this.offlineMode || !this.supabase) {
+           return this.offlinePurchase(playerId, itemId, cost);
+      }
       
+      const p = this.state.players[playerId];
+      if (!p) return { success: false, message: "Player error" };
+      if (p.money < cost) return { success: false, message: "Fundos insuficientes" };
+
+      // 2. OPTIMISTIC UPDATE (Client Side First)
+      // This makes the UI feel instant
+      const oldMoney = p.money;
+      const oldInv = { ...p.inventory };
+      
+      p.money -= cost;
+      p.inventory[itemId] = (p.inventory[itemId] || 0) + 1;
+
       try {
+          // 3. Perform RPC
           const { data, error } = await this.supabase.rpc('purchase_item', {
               player_id: playerId,
               item_id: itemId,
               cost: cost
           });
+
           if (error) throw error;
-          if (data === false) return { success: false, message: "Fundos insuficientes" };
-          return { success: true, message: "Comprado" };
+          
+          if (data === false) {
+             // Rollback if server says no
+             p.money = oldMoney;
+             p.inventory = oldInv;
+             return { success: false, message: "Fundos insuficientes" };
+          }
+
+          return { success: true, message: "Item Adquirido" };
       } catch (e) {
+          console.error("Purchase Sync Error", e);
+          // Rollback on network error? Or keep offline? 
+          // For now, let's assume if it failed, we rollback to stay safe.
+          p.money = oldMoney;
+          p.inventory = oldInv;
           return { success: false, message: "Erro na transação" };
       }
   }
@@ -470,6 +496,10 @@ export class GameService {
         });
 
         if (error) throw error;
+        
+        // Ensure state sync after item use to show effect immediately
+        await this.syncState(playerId);
+
         return data;
       } catch (e) {
           return { success: false, message: "Erro ao usar item" };
@@ -506,7 +536,7 @@ export class GameService {
   }
 
   private getRandomColor() {
-      const colors = ['#0aff00', '#00f3ff', '#ff003c', '#eab308', '#ec4899', '#8b5cf6', '#ffffff', '#f97316'];
+      const colors = ['#0aff00', '#00f3ff', '#ff003c', '#eab308', '#bf00ff', '#8b5cf6', '#ffffff', '#f97316'];
       return colors[Math.floor(Math.random() * colors.length)];
   }
 

@@ -1,8 +1,8 @@
 
 
 import React, { memo, useEffect, useRef } from 'react';
-import { MapContainer, TileLayer, Rectangle, Tooltip, useMap, Marker, Polyline } from 'react-leaflet';
-import L, { LatLngExpression } from 'leaflet';
+import { MapContainer, TileLayer, Rectangle, Tooltip, useMap, Marker } from 'react-leaflet';
+import L from 'leaflet';
 import { MAP_TILE_URL, MAP_ATTRIBUTION, COLORS, GRID_SIZE } from '../constants';
 import { Territory, Player, VisualEffect } from '../types';
 
@@ -45,7 +45,9 @@ const MapController = ({
 
   useEffect(() => {
     if (recenterTrigger !== prevTrigger.current) {
-      map.flyTo([centerLat, centerLng], map.getZoom(), { duration: 1.5 });
+      // Force high zoom on recenter for "tactical" feel
+      const targetZoom = Math.max(map.getZoom(), 17);
+      map.flyTo([centerLat, centerLng], targetZoom, { duration: 2.0, easeLinearity: 0.5 });
       prevTrigger.current = recenterTrigger;
     }
   }, [recenterTrigger, centerLat, centerLng, map]);
@@ -68,11 +70,11 @@ const ICONS = {
   // Simple Dot
   OUTPOST: `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="8"/></svg>`,
   // Shield
-  FORT: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
+  FORT: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0 0 4px currentColor);"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
   // Castle/Rook
-  BASE: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10c0-1.1.9-2 2-2h12a2 2 0 0 1 2 2v10H4V10z"/><path d="M8 2v6"/><path d="M16 2v6"/><path d="M12 2v6"/></svg>`,
+  BASE: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0 0 6px currentColor);"><path d="M4 10c0-1.1.9-2 2-2h12a2 2 0 0 1 2 2v10H4V10z"/><path d="M8 2v6"/><path d="M16 2v6"/><path d="M12 2v6"/></svg>`,
   // Target Reticle
-  RETICLE: `<svg width="60" height="60" viewBox="0 0 100 100" class="selection-ring"><circle cx="50" cy="50" r="45" stroke="white" stroke-width="2" fill="none" stroke-dasharray="10 5" opacity="0.8"/><circle cx="50" cy="50" r="35" stroke="#00f3ff" stroke-width="1" fill="none" opacity="0.5"/><line x1="50" y1="5" x2="50" y2="20" stroke="white" stroke-width="2"/><line x1="50" y1="95" x2="50" y2="80" stroke="white" stroke-width="2"/><line x1="5" y1="50" x2="20" y2="50" stroke="white" stroke-width="2"/><line x1="95" y1="50" x2="80" y2="50" stroke="white" stroke-width="2"/></svg>`
+  RETICLE: `<svg width="80" height="80" viewBox="0 0 100 100" class="selection-ring"><circle cx="50" cy="50" r="45" stroke="white" stroke-width="2" fill="none" stroke-dasharray="2 10" opacity="0.8"/><circle cx="50" cy="50" r="35" stroke="#00f3ff" stroke-width="2" fill="none" opacity="0.9"/><path d="M50 0 L50 15 M50 100 L50 85 M0 50 L15 50 M100 50 L85 50" stroke="#00f3ff" stroke-width="3" /></svg>`
 };
 
 const MapComponent: React.FC<MapProps> = ({ 
@@ -114,18 +116,19 @@ const MapComponent: React.FC<MapProps> = ({
 
         {/* Territory Grid */}
         {Object.values(territories).map((t) => {
-           const offset = GRID_SIZE / 2;
+           const offset = GRID_SIZE / 2 * 0.95; // Small gap between squares
            const bounds: [number, number][] = [
              [t.lat - offset, t.lng - offset],
              [t.lat + offset, t.lng + offset]
            ];
 
            let fillColor = COLORS.NEUTRAL;
-           let fillOpacity = 0.2;
+           let fillOpacity = 0.15;
            let strokeColor = COLORS.STROKE;
            let weight = 1;
            let ownerName = "Neutro";
-           let textColor = '#94a3b8'; // gray-400
+           let textColor = '#64748b'; // slate-500
+           let className = 'territory-poly';
 
            // State determination
            const isOwner = t.ownerId === currentPlayerId;
@@ -138,8 +141,11 @@ const MapComponent: React.FC<MapProps> = ({
                 ownerName = owner.username;
                 fillColor = isOwner ? COLORS.PLAYER : owner.color;
                 textColor = isOwner ? '#0aff00' : owner.color;
+                
+                // Add pulse effect for owned territories
+                if (isOwner) className += ' territory-owned';
              } else {
-                 ownerName = "Desconhecido";
+                 ownerName = "Unknown Signal";
                  fillColor = COLORS.ENEMY;
                  textColor = COLORS.ENEMY;
              }
@@ -152,8 +158,9 @@ const MapComponent: React.FC<MapProps> = ({
 
            if (isSelected) {
               strokeColor = '#ffffff';
-              weight = 2;
+              weight = 3;
               fillOpacity = 0.6;
+              className += ' z-[500]';
            }
 
            return (
@@ -166,7 +173,7 @@ const MapComponent: React.FC<MapProps> = ({
                    weight, 
                    fillColor, 
                    fillOpacity,
-                   className: 'territory-poly' 
+                   className: className
                  }}
                  eventHandlers={{
                    click: () => onTerritoryClick(t.id),
@@ -179,9 +186,9 @@ const MapComponent: React.FC<MapProps> = ({
                  eventHandlers={{ click: () => onTerritoryClick(t.id) }}
                  icon={L.divIcon({
                     className: 'floating-text-icon',
-                    html: `<div class="tier-icon" style="color: ${textColor}">
+                    html: `<div class="tier-icon transition-transform duration-300 hover:scale-125" style="color: ${textColor}">
                              ${TierIcon}
-                             <span style="position: absolute; bottom: -12px; font-size: 9px; font-weight: bold; background: rgba(0,0,0,0.6); padding: 0 3px; border-radius: 4px; border: 1px solid ${strokeColor};">${t.strength}</span>
+                             <span style="position: absolute; bottom: -14px; font-size: 10px; font-weight: 900; background: rgba(0,0,0,0.8); padding: 1px 4px; border-radius: 4px; border: 1px solid ${strokeColor}; font-family: monospace;">${t.strength}</span>
                            </div>`,
                     iconSize: [30, 30],
                     iconAnchor: [15, 15]
@@ -189,13 +196,14 @@ const MapComponent: React.FC<MapProps> = ({
                >
                   <Tooltip 
                     direction="top" 
-                    offset={[0, -10]}
-                    opacity={0.9}
-                    className="bg-panel-bg border border-gray-600 text-white font-mono text-xs z-[1000]"
+                    offset={[0, -20]}
+                    opacity={1}
+                    className="bg-transparent border-none shadow-none"
                   >
-                     <div className="text-center">
-                        <div className="font-bold text-neon-blue">{t.name}</div>
-                        <div className="text-[10px] text-gray-400">{ownerName}</div>
+                     <div className="bg-panel-bg border border-neon-blue/50 text-white p-2 rounded-lg backdrop-blur-md shadow-xl text-center min-w-[120px]">
+                        <div className="font-bold text-neon-blue uppercase tracking-widest text-xs border-b border-gray-700 pb-1 mb-1">{t.name}</div>
+                        <div className="text-[10px] text-gray-300 font-mono">{ownerName}</div>
+                        <div className="text-[10px] text-gray-400 mt-1">STR: {t.strength} | GPS: {t.lat.toFixed(3)}, {t.lng.toFixed(3)}</div>
                      </div>
                   </Tooltip>
                </Marker>
@@ -207,8 +215,8 @@ const MapComponent: React.FC<MapProps> = ({
                     icon={L.divIcon({
                         className: 'selection-reticle',
                         html: ICONS.RETICLE,
-                        iconSize: [60, 60],
-                        iconAnchor: [30, 30]
+                        iconSize: [80, 80],
+                        iconAnchor: [40, 40]
                     })}
                  />
                )}
@@ -223,11 +231,13 @@ const MapComponent: React.FC<MapProps> = ({
             position={[effect.lat, effect.lng]}
             icon={L.divIcon({
               className: 'floating-text-icon',
-              html: `<div class="animate-float-up font-bold text-xl" style="color: ${
-                effect.color === 'green' ? '#0aff00' : effect.color === 'red' ? '#ff003c' : '#ffffff'
-              }; text-shadow: 0 0 5px black;">${effect.text}</div>`,
-              iconSize: [100, 40],
-              iconAnchor: [50, 20]
+              html: `<div class="animate-float-up font-black text-2xl" style="
+                  color: ${effect.color === 'green' ? '#0aff00' : effect.color === 'red' ? '#ff003c' : '#ffffff'}; 
+                  text-shadow: 0 0 10px ${effect.color === 'green' ? 'rgba(10,255,0,0.8)' : effect.color === 'red' ? 'rgba(255,0,60,0.8)' : 'rgba(255,255,255,0.8)'};
+                  white-space: nowrap;
+                ">${effect.text}</div>`,
+              iconSize: [120, 50],
+              iconAnchor: [60, 25]
             })}
           />
         ))}

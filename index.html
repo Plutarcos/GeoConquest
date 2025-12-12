@@ -1,3 +1,5 @@
+
+
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -17,27 +19,34 @@
               'neon-blue': '#00f3ff',
               'neon-red': '#ff003c',
               'neon-green': '#0aff00',
+              'neon-purple': '#bf00ff',
               'dark-bg': '#050510',
-              'panel-bg': 'rgba(20, 20, 35, 0.85)',
+              'panel-bg': 'rgba(10, 10, 20, 0.90)',
             },
             fontFamily: {
               mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
               sans: ['system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
             },
             animation: {
-              'fade-in': 'fadeIn 0.5s ease-out',
-              'float-up': 'floatUp 1.5s ease-out forwards',
-              'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-              'spin-slow': 'spin 8s linear infinite',
+              'fade-in': 'fadeIn 0.3s ease-out',
+              'float-up': 'floatUp 1.2s ease-out forwards',
+              'pulse-fast': 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              'spin-slow': 'spin 10s linear infinite',
+              'glitch': 'glitch 1s linear infinite',
             },
             keyframes: {
               fadeIn: {
-                '0%': { opacity: '0' },
-                '100%': { opacity: '1' },
+                '0%': { opacity: '0', transform: 'scale(0.95)' },
+                '100%': { opacity: '1', transform: 'scale(1)' },
               },
               floatUp: {
                 '0%': { transform: 'translateY(0) scale(1)', opacity: '1' },
-                '100%': { transform: 'translateY(-30px) scale(1.2)', opacity: '0' },
+                '100%': { transform: 'translateY(-40px) scale(1.5)', opacity: '0' },
+              },
+              glitch: {
+                '2%, 64%': { transform: 'translate(2px,0) skew(0deg)' },
+                '4%, 60%': { transform: 'translate(-2px,0) skew(0deg)' },
+                '62%': { transform: 'translate(0,0) skew(5deg)' },
               }
             }
           },
@@ -46,19 +55,19 @@
     </script>
     <style>
       body {
-        background-color: #050510;
+        background-color: #000000;
         color: #ffffff;
         overflow: hidden;
       }
       /* Custom Scrollbar */
       ::-webkit-scrollbar {
-        width: 6px;
+        width: 4px;
       }
       ::-webkit-scrollbar-track {
         background: #0f172a;
       }
       ::-webkit-scrollbar-thumb {
-        background: #334155;
+        background: #00f3ff;
         border-radius: 4px;
       }
       
@@ -69,38 +78,54 @@
         background: #050510;
         font-family: 'ui-monospace', monospace;
       }
+
+      /* Map Filter for Dark/Sci-fi Look */
+      .leaflet-layer {
+        filter: contrast(1.2) brightness(0.8) saturate(0.2);
+      }
       
       /* Territory Polygon Styles */
       .territory-poly {
         transition: all 0.3s ease;
+        stroke-dasharray: 5, 5;
       }
       .territory-poly:hover {
-        stroke-width: 2px !important;
+        stroke-width: 3px !important;
         stroke: #ffffff !important;
-        filter: brightness(1.3);
+        stroke-dasharray: 0;
+        filter: drop-shadow(0 0 8px currentColor);
+        z-index: 1000;
       }
 
-      /* Tier Icons in Map Center */
-      .tier-icon {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 100%;
-        height: 100%;
-        filter: drop-shadow(0 2px 3px rgba(0,0,0,0.8));
-        transition: transform 0.2s ease;
+      /* Owned Territory Effect */
+      .territory-owned {
+        animation: territory-pulse 3s infinite alternate;
+        stroke-dasharray: 0;
       }
-      .tier-icon:hover {
-        transform: scale(1.2);
+
+      @keyframes territory-pulse {
+        0% { fill-opacity: 0.3; stroke-width: 1; }
+        100% { fill-opacity: 0.5; stroke-width: 2; filter: drop-shadow(0 0 5px currentColor); }
+      }
+
+      /* Floating Text Marker */
+      .floating-text-icon {
+        background: transparent !important;
+        border: none !important;
+        text-align: center;
+        overflow: visible !important;
+        pointer-events: none;
       }
 
       /* Selection Reticle */
       .selection-reticle {
         pointer-events: none;
+        z-index: 400;
       }
       .selection-ring {
-        animation: spin 6s linear infinite;
+        animation: spin 4s linear infinite;
         transform-origin: center;
+        filter: drop-shadow(0 0 5px #00f3ff);
       }
       
       /* Custom Range Slider */
@@ -110,12 +135,12 @@
       }
       input[type=range]::-webkit-slider-thumb {
         -webkit-appearance: none;
-        height: 16px;
-        width: 16px;
+        height: 12px;
+        width: 12px;
         border-radius: 50%;
         background: #00f3ff;
         cursor: pointer;
-        margin-top: -6px; 
+        margin-top: -4px; 
         box-shadow: 0 0 10px #00f3ff;
       }
       input[type=range]::-webkit-slider-runnable-track {
@@ -126,18 +151,7 @@
         border-radius: 2px;
       }
       
-      /* Floating Text Marker */
-      .floating-text-icon {
-        background: transparent !important;
-        border: none !important;
-        text-align: center;
-        overflow: visible !important;
-      }
-
-      /* Disable leaflet default controls if we want custom ones, but we keep attribution */
-      .leaflet-control-zoom {
-        display: none;
-      }
+      .leaflet-control-zoom { display: none; }
       
       @keyframes spin {
         from { transform: rotate(0deg); }
